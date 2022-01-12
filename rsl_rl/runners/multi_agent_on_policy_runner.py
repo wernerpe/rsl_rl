@@ -36,7 +36,7 @@ import statistics
 from torch.utils.tensorboard import SummaryWriter
 import torch
 
-from rsl_rl.algorithms import PPO
+from rsl_rl.algorithms import PPO, MAPPO
 from rsl_rl.modules import MAActorCritic, ActorCritic, ActorCriticRecurrent
 from rsl_rl.env import VecEnv
 
@@ -64,8 +64,9 @@ class MAOnPolicyRunner:
                                                         self.env.num_actions,
                                                         **self.policy_cfg).to(self.device)
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
-        self.alg: PPO = alg_class(actor_critic, device=self.device, **self.alg_cfg)
+        self.alg: MAPPO = alg_class(actor_critic, device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
+        self.population_update_interval = self.cfg["population_update_interval"]
         self.save_interval = self.cfg["save_interval"]
 
         # init storage and model
@@ -114,13 +115,15 @@ class MAOnPolicyRunner:
                         # Book keeping
                         if 'episode' in infos:
                             ep_infos.append(infos['episode'])
-                        cur_reward_sum += rewards
+                        cur_reward_sum += rewards[:, 0]
                         cur_episode_length += 1
                         new_ids = (dones > 0).nonzero(as_tuple=False)
                         rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
                         lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
                         cur_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
+
+                    self.alg.actor_critic.update_ac_ratings(dones, infos)
 
                 stop = time.time()
                 collection_time = stop - start
@@ -130,6 +133,8 @@ class MAOnPolicyRunner:
                 self.alg.compute_returns(critic_obs)
             
             mean_value_loss, mean_surrogate_loss = self.alg.update()
+            if  it % self.population_update_interval == 0:
+                self.alg.update_population()
             stop = time.time()
             learn_time = stop - start
             if self.log_dir is not None:
@@ -170,6 +175,8 @@ class MAOnPolicyRunner:
         self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
         self.writer.add_scalar('Perf/collection time', locs['collection_time'], locs['it'])
         self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
+        self.writer.add_scalar('Agent/Trueskill', self.alg.actor_critic.agentratings[0][0].mu, locs['it'])
+        
         if len(locs['rewbuffer']) > 0:
             self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
             self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
@@ -212,7 +219,7 @@ class MAOnPolicyRunner:
 
     def save(self, path, infos=None):
         torch.save({
-            'model_state_dict': self.alg.actor_critic.state_dict(),
+            'model_state_dict': self.alg.actor_critic.ac1.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
             'iter': self.current_learning_iteration,
             'infos': infos,

@@ -30,3 +30,4 @@
 
 from .actor_critic import ActorCritic
 from .actor_critic_recurrent import ActorCriticRecurrent
+from .multi_agent_actor_critic import MAActorCritic

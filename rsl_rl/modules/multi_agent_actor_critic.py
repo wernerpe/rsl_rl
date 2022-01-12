@@ -34,6 +34,7 @@ import torch
 from torch.distributions import Normal
 import copy
 from rsl_rl.modules import ActorCritic
+import trueskill
 
 #2 agent actor critic
 class MAActorCritic():
@@ -58,9 +59,12 @@ class MAActorCritic():
                                 **kwargs)
         
         self.ac2 = copy.deepcopy(self.ac1)
+        self.is_recurrent = False
 
-        self.true_skill = []
 
+        self.agentratings = []
+        for idx in range(2):
+            self.agentratings.append((trueskill.Rating(),))
 
     def reset(self, dones=None):
         pass
@@ -82,7 +86,16 @@ class MAActorCritic():
     
     @property
     def parameters(self):
-        return self.ac1.parameters()
+        return self.ac1.parameters
+        
+    def train(self):
+       self.ac1.train()
+       return None
+    
+    def to(self, device):
+        self.ac1.to(device)
+        self.ac2.to(device)
+        return self
 
     def act(self, observations, **kwargs):
         actions1 = self.ac1.act(observations[:, 0,:])
@@ -103,12 +116,26 @@ class MAActorCritic():
         value = self.ac1.critic(critic_observations)
         return value
 
-    def update_ac_ratings(self, performance):
-        #update performance metrics of current policies,
-        # e.g. using true skill
-        pass
+    def update_ac_ratings(self, dones, infos):
+        #update performance metrics of current policies
+        num_races = torch.sum(1.0*dones)
+        if num_races:
+            avgranking = torch.mean(infos['ranking'][dones, :], dim = 0)
+            #only update rankings if result is significant
+            if avgranking[0] > 0.7:
+                avgranking = [1, 0]
+            elif avgranking[0] < 0.3:
+                avgranking = [1, 0]
+            else:
+                avgranking = [0, 0]
+                return
+
+            update_ratio = num_races/len(dones)
+            weighting = {(0,0):update_ratio, (1,0):update_ratio} 
+            self.agentratings = trueskill.rate(self.agentratings, avgranking, weights = weighting)
 
     def redraw_ac_networks(self):
         #update population of competing agents, here simply load 
         #old version of agent 1 into ac2 slot
-        pass
+        self.ac2 = copy.deepcopy(self.ac1)
+        #potentially randomize here

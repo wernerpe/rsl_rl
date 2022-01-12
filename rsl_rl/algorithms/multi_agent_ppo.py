@@ -33,7 +33,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from rsl_rl.modules import MAActorCritic
-from rsl_rl.storage import MARolloutStorage
+from rsl_rl.storage import RolloutStorage
 
 #only track transitions of agent 1, agent 2 blindly runs old version of policy 
 #which gets exchanged periodically for the current version
@@ -69,7 +69,7 @@ class MAPPO:
         self.actor_critic.to(self.device)
         self.storage = None # initialized later
         self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
-        self.transition = MARolloutStorage.Transition()
+        self.transition = RolloutStorage.Transition()
 
         # PPO parameters
         self.clip_param = clip_param
@@ -83,7 +83,7 @@ class MAPPO:
         self.use_clipped_value_loss = use_clipped_value_loss
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape):
-        self.storage = MARolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, self.device)
+        self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, self.device)
 
     def test_mode(self):
         self.actor_critic.test()
@@ -94,20 +94,23 @@ class MAPPO:
     def act(self, obs, critic_obs):
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
+        
         # Compute the actions and values
-        self.transition.actions = self.actor_critic.act(obs).detach()
-        self.transition.values = self.actor_critic.evaluate(critic_obs).detach()
+        all_agent_actions =  self.actor_critic.act(obs).detach()
+        self.transition.actions = all_agent_actions[:, 0, :]
+        self.transition.values = self.actor_critic.evaluate(critic_obs[:, 0, :]).detach()
+        #only record log prob of actions from net to train
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()
         self.transition.action_sigma = self.actor_critic.action_std.detach()
         # need to record obs and critic_obs before env.step()
-        self.transition.observations = obs
+        self.transition.observations = obs[:,0,:]
         self.transition.critic_observations = critic_obs
-        return self.transition.actions
+        return all_agent_actions
     
     def process_env_step(self, rewards, dones, infos):
-        self.transition.rewards = rewards.clone()
-        self.transition.dones = dones
+        self.transition.rewards = rewards.clone()[:, 0]
+        self.transition.dones = dones[:, 0]
         # Bootstrapping on time outs
         if 'time_outs' in infos:
             self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
@@ -189,3 +192,6 @@ class MAPPO:
         self.storage.clear()
 
         return mean_value_loss, mean_surrogate_loss
+
+    def update_population(self,):
+        self.actor_critic.redraw_ac_networks()
