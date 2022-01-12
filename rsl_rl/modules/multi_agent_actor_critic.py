@@ -46,6 +46,16 @@ class MAActorCritic():
                         activation='elu',
                         init_noise_std=1.0,
                         **kwargs):
+
+        self.num_actor_obs = num_actor_obs
+        self.num_critic_obs = num_critic_obs
+        self.num_actions = num_actions
+        self.actor_hidden_dims = actor_hidden_dims
+        self.critic_hidden_dims= critic_hidden_dims
+        self.activation = activation
+        self.init_noise_std = init_noise_std
+        self.kwargs = kwargs
+
         if kwargs:
             print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
         
@@ -64,7 +74,7 @@ class MAActorCritic():
 
         self.agentratings = []
         for idx in range(2):
-            self.agentratings.append((trueskill.Rating(),))
+            self.agentratings.append((trueskill.Rating(mu=0),))
 
     def reset(self, dones=None):
         pass
@@ -80,6 +90,10 @@ class MAActorCritic():
     def action_std(self):
         return self.ac1.distribution.stddev
     
+    @property
+    def std(self):
+        return self.ac1.std
+
     @property
     def entropy(self):
         return self.ac1.distribution.entropy().sum(dim=-1)
@@ -103,6 +117,10 @@ class MAActorCritic():
         actions = torch.cat((actions1.unsqueeze(1), actions2.unsqueeze(1)), dim = 1)
         return actions
     
+    def act_ac_train(self, observations, **kwargs):
+        actions = self.ac1.act(observations)
+        return actions
+    
     def get_actions_log_prob(self, actions):
         return self.ac1.distribution.log_prob(actions).sum(dim=-1)
 
@@ -118,24 +136,39 @@ class MAActorCritic():
 
     def update_ac_ratings(self, dones, infos):
         #update performance metrics of current policies
-        num_races = torch.sum(1.0*dones)
-        if num_races:
-            avgranking = torch.mean(infos['ranking'][dones, :], dim = 0)
+        if 'ranking' in infos:         
+            dones_idx = torch.unique(torch.where(dones)[0])
+            avgranking = torch.mean(1.0*infos['ranking'], dim = 0)
+
             #only update rankings if result is significant
-            if avgranking[0] > 0.7:
+            if avgranking[0] > 0.55:
                 avgranking = [1, 0]
-            elif avgranking[0] < 0.3:
-                avgranking = [1, 0]
+            elif avgranking[0] < 0.45:
+                avgranking = [0, 1]
             else:
-                avgranking = [0, 0]
+                #result isnt strong enough
                 return
 
-            update_ratio = num_races/len(dones)
-            weighting = {(0,0):update_ratio, (1,0):update_ratio} 
-            self.agentratings = trueskill.rate(self.agentratings, avgranking, weights = weighting)
+            update_ratio = (len(dones_idx)/len(dones)*torch.mean(infos['percentage_max_episode_length'])).item()
+            new_ratings = trueskill.rate(self.agentratings, avgranking)
+            for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
+                mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
+                sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
+                self.agentratings[it] = (trueskill.Rating(mu, sigma),)
 
     def redraw_ac_networks(self):
         #update population of competing agents, here simply load 
         #old version of agent 1 into ac2 slot
-        self.ac2 = copy.deepcopy(self.ac1)
+        self.ac1 = self.ac1
+        self.ac2 = ActorCritic( self.num_actor_obs,
+                                self.num_critic_obs,
+                                self.num_actions,
+                                self.actor_hidden_dims,
+                                self.critic_hidden_dims,
+                                self.activation,
+                                self.init_noise_std, 
+                                **self.kwargs)
+
+        self.ac2.load_state_dict(self.ac1.state_dict())     
+        self.ac2.to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))             
         #potentially randomize here
