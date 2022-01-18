@@ -76,6 +76,11 @@ class MAActorCritic():
         for idx in range(2):
             self.agentratings.append((trueskill.Rating(mu=0),))
 
+        self.max_num_models = 20
+        self.past_models = [self.ac1.state_dict()]
+        self.past_ratings_mu = [0]
+        self.past_ratings_sigma = [self.agentratings[0][0].sigma]
+
     def reset(self, dones=None):
         pass
 
@@ -173,7 +178,14 @@ class MAActorCritic():
     def redraw_ac_networks(self):
         #update population of competing agents, here simply load 
         #old version of agent 1 into ac2 slot
-        self.ac1 = self.ac1
+        self.past_models.append(self.ac1.state_dict())
+        self.past_ratings_mu.append(self.agentratings[0][0].mu)
+        self.past_ratings_sigma.append(self.agentratings[0][0].sigma)
+        if len(self.past_models)> self.max_num_models:
+            del self.past_models[0]
+            del self.past_ratings_mu[0]
+            del self.past_ratings_sigma[0]
+
         self.ac2 = ActorCritic( self.num_actor_obs,
                                 self.num_critic_obs,
                                 self.num_actions,
@@ -182,10 +194,16 @@ class MAActorCritic():
                                 self.activation,
                                 self.init_noise_std, 
                                 **self.kwargs)
-
-        self.ac2.load_state_dict(self.ac1.state_dict())     
-        self.ac2.to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))             
-        new_rating = (trueskill.Rating(mu=self.agentratings[0][0].mu),)
-        self.agentratings[1] = self.agentratings[0]
-        self.agentratings[0] = new_rating
+        #select model to load
+        idx = np.random.choice(len(self.past_models))
+        state_dict = self.past_models[idx]
+        mu = self.past_ratings_mu[idx]
+        sigma = self.past_ratings_sigma[idx]
         #potentially randomize here
+
+        self.ac2.load_state_dict(state_dict)     
+        self.ac2.to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))             
+        rating2 = (trueskill.Rating(mu = mu, sigma = sigma ),)
+        rating1 = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = 1.5*self.agentratings[0][0].sigma),)
+        self.agentratings[0] = rating1
+        self.agentratings[1] = rating2
