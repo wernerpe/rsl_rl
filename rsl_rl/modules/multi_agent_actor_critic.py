@@ -101,7 +101,15 @@ class MAActorCritic():
     @property
     def parameters(self):
         return self.ac1.parameters
-        
+    
+    def load_state_dict(self, path):
+        self.ac1.load_state_dict(path)
+        self.ac2.load_state_dict(path)
+
+    def eval(self):
+        self.ac1.eval()
+        self.ac2.eval()
+
     def train(self):
        self.ac1.train()
        return None
@@ -117,6 +125,12 @@ class MAActorCritic():
         actions = torch.cat((actions1.unsqueeze(1), actions2.unsqueeze(1)), dim = 1)
         return actions
     
+    def act_inference(self, observations):
+        actions1 = self.ac1.act_inference(observations[:, 0,:])
+        actions2 = self.ac2.act_inference(observations[:, 1,:])
+        actions = torch.cat((actions1.unsqueeze(1), actions2.unsqueeze(1)), dim = 1)
+        return actions
+        
     def act_ac_train(self, observations, **kwargs):
         actions = self.ac1.act(observations)
         return actions
@@ -125,8 +139,8 @@ class MAActorCritic():
         return self.ac1.distribution.log_prob(actions).sum(dim=-1)
 
     def act_inference(self, observations):
-        actions1 = self.ac1.act_inference(observations)
-        actions2 = self.ac2.act_inference(observations)
+        actions1 = self.ac1.act_inference(observations[:, 0,:])
+        actions2 = self.ac2.act_inference(observations[:, 1,:])
         actions = torch.cat((actions1.unsqueeze(1), actions2.unsqueeze(1)), dim = 1)
         return actions
     
@@ -171,4 +185,7 @@ class MAActorCritic():
 
         self.ac2.load_state_dict(self.ac1.state_dict())     
         self.ac2.to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))             
+        new_rating = (trueskill.Rating(mu=self.agentratings[0][0].mu),)
+        self.agentratings[1] = self.agentratings[0]
+        self.agentratings[0] = new_rating
         #potentially randomize here
