@@ -111,6 +111,10 @@ class MAActorCritic():
         self.ac1.load_state_dict(path)
         self.ac2.load_state_dict(path)
 
+    def load_multi_state_dict(self, paths):
+        self.ac1.load_state_dict(paths[0])
+        self.ac2.load_state_dict(paths[1])
+
     def eval(self):
         self.ac1.eval()
         self.ac2.eval()
@@ -204,6 +208,6 @@ class MAActorCritic():
         self.ac2.load_state_dict(state_dict)     
         self.ac2.to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))             
         rating2 = (trueskill.Rating(mu = mu, sigma = sigma ),)
-        rating1 = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = 1.5*self.agentratings[0][0].sigma),)
+        rating1 = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = 1.1*self.agentratings[0][0].sigma),)
         self.agentratings[0] = rating1
         self.agentratings[1] = rating2

@@ -235,6 +235,22 @@ class MAOnPolicyRunner:
         self.current_learning_iteration = loaded_dict['iter']
         return loaded_dict['infos']
 
+    def load_multi_path(self, paths, load_optimizer=True):
+        model_dicts = []
+        opt_dicts = []
+        dicts = []
+        for path in paths:
+            dict = torch.load(path)
+            dicts.append(dict)
+            model_dicts.append(dict['model_state_dict'])
+            opt_dicts.append(dict['optimizer_state_dict'])
+        self.alg.actor_critic.load_multi_state_dict(model_dicts)
+        if load_optimizer:
+            #raise NotImplementedError
+            self.alg.optimizer.load_state_dict(opt_dicts[0])
+        self.current_learning_iteration = dicts[0]['iter']
+        return dicts[0]['infos']
+
     def get_inference_policy(self, device=None):
         self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)
         if device is not None:
