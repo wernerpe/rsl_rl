@@ -220,6 +220,7 @@ class MAOnPolicyRunner:
         print(log_string)
 
     def save(self, path, infos=None):
+        infos = {'trueskill': {'mu':self.alg.actor_critic.agentratings[0][0].mu, 'sigma':self.alg.actor_critic.agentratings[0][0].sigma}}
         torch.save({
             'model_state_dict': self.alg.actor_critic.ac1.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
@@ -249,10 +250,17 @@ class MAOnPolicyRunner:
             #raise NotImplementedError
             self.alg.optimizer.load_state_dict(opt_dicts[0])
         self.current_learning_iteration = dicts[0]['iter']
-        return dicts[0]['infos']
+        infos = [dict['infos'] for dict in dicts]
+        return infos
 
     def get_inference_policy(self, device=None):
         self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)
         if device is not None:
             self.alg.actor_critic.to(device)
         return self.alg.actor_critic.act_inference
+
+    def get_value_functions(self, device=None):
+        self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)
+        if device is not None:
+            self.alg.actor_critic.to(device)
+        return self.alg.actor_critic.evaluate_inference

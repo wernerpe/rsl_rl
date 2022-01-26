@@ -76,7 +76,7 @@ class MAActorCritic():
         for idx in range(2):
             self.agentratings.append((trueskill.Rating(mu=0),))
 
-        self.max_num_models = 20
+        self.max_num_models = 40
         self.past_models = [self.ac1.state_dict()]
         self.past_ratings_mu = [0]
         self.past_ratings_sigma = [self.agentratings[0][0].sigma]
@@ -153,6 +153,12 @@ class MAActorCritic():
         actions = torch.cat((actions1.unsqueeze(1), actions2.unsqueeze(1)), dim = 1)
         return actions
     
+    def evaluate_inference(self, observations):
+        values1 = self.ac1.evaluate(observations[:, 0,:])
+        values2 = self.ac2.evaluate(observations[:, 1,:])
+        values = torch.cat((values1.unsqueeze(1), values2.unsqueeze(1)), dim = 1)
+        return values
+    
     def evaluate(self, critic_observations, **kwargs):
         value = self.ac1.critic(critic_observations)
         return value
@@ -208,6 +214,6 @@ class MAActorCritic():
         self.ac2.load_state_dict(state_dict)     
         self.ac2.to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))             
         rating2 = (trueskill.Rating(mu = mu, sigma = sigma ),)
-        rating1 = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = 1.1*self.agentratings[0][0].sigma),)
+        rating1 = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = 1.01*self.agentratings[0][0].sigma),)
         self.agentratings[0] = rating1
         self.agentratings[1] = rating2
