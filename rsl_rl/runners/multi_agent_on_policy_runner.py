@@ -47,7 +47,8 @@ class MAOnPolicyRunner:
                  env: VecEnv,
                  train_cfg,
                  log_dir=None,
-                 device='cpu'):
+                 device='cpu',
+                 num_agents = 2):
 
         self.cfg=train_cfg["runner"]
         self.alg_cfg = train_cfg["algorithm"]
@@ -61,6 +62,7 @@ class MAOnPolicyRunner:
         actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCritic
         actor_critic: MAActorCritic = actor_critic_class( self.env.num_obs,
                                                         num_critic_obs,
+                                                        num_agents,
                                                         self.env.num_actions,
                                                         **self.policy_cfg).to(self.device)
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
