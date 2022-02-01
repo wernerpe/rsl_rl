@@ -136,7 +136,7 @@ class MAActorCritic():
     def act(self, observations, **kwargs):
         actions = []
         actions.append(self.ac1.act(observations[:, 0,:]).unsqueeze(1))
-        op_actions = [ac.act(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
+        op_actions = [ac.act_inference(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
         actions += op_actions 
         actions = torch.cat(tuple(actions), dim = 1)
         return actions
@@ -182,7 +182,7 @@ class MAActorCritic():
                     ranks_final[env] = ranks_final[agent_of_rank[idx]] + 1 
                 else:
                     ranks_final[env] = ranks_final[agent_of_rank[idx]]
-            ranks_final = (ranks_final+1).tolist()
+            ranks_final = (ranks_final).tolist()
             
             if ranks_final[0] == ranks_final[1] and self.num_agents == 2:
                 #dont update ratings on ties for 1v1 because leads to unstable behavior
@@ -226,6 +226,6 @@ class MAActorCritic():
             rating = (trueskill.Rating(mu = mu, sigma = sigma ),) 
             self.agentratings[op_id+1] = rating
 
-        #rating_train_pol = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = 1.01*self.agentratings[0][0].sigma),)
-        #self.agentratings[0] = rating_train_pol 
+        rating_train_pol = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = self.agentratings[0][0].sigma),)
+        self.agentratings[0] = rating_train_pol 
         
