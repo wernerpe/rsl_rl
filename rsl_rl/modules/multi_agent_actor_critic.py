@@ -206,14 +206,6 @@ class MAActorCritic():
             del self.past_ratings_mu[0]
             del self.past_ratings_sigma[0]
 
-        self.ac2 = ActorCritic( self.num_actor_obs,
-                                self.num_critic_obs,
-                                self.num_actions,
-                                self.actor_hidden_dims,
-                                self.critic_hidden_dims,
-                                self.activation,
-                                self.init_noise_std, 
-                                **self.kwargs)
         #select model to load
         idx = np.random.choice(len(self.past_models), self.num_agents-1)
         for op_id, past_model_id in enumerate(idx):
@@ -229,3 +221,5 @@ class MAActorCritic():
         rating_train_pol = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = self.agentratings[0][0].sigma),)
         self.agentratings[0] = rating_train_pol 
         
+    def new_rating(self, mu, sigma):
+        return (trueskill.Rating(mu = mu, sigma = sigma ),) 

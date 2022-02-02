@@ -252,8 +252,33 @@ class MAOnPolicyRunner:
             #raise NotImplementedError
             self.alg.optimizer.load_state_dict(opt_dicts[0])
         self.current_learning_iteration = dicts[0]['iter']
-        infos = [dict['infos'] for dict in dicts]
+
+        #add loaded models to buffers and set current ratings
+        infos = []
+        self.alg.actor_critic.past_models = model_dicts
+        self.alg.actor_critic.agentratings = []
+        self.alg.actor_critic.past_ratings_mu = []
+        self.alg.actor_critic.past_ratings_sigma = []
+        for dict in dicts:
+            info = dict['infos']
+            mu = info['trueskill']['mu']
+            sigma = info['trueskill']['sigma']
+            active_rating = self.alg.actor_critic.new_rating(mu, sigma)
+            self.alg.actor_critic.agentratings.append(active_rating)
+            self.alg.actor_critic.past_ratings_mu.append(mu)
+            self.alg.actor_critic.past_ratings_sigma.append(sigma)
+            infos.append(info)
         return infos
+    
+    def populate_adversary_buffer(self, paths):
+        for path in paths:
+            dict = torch.load(path)
+            info = dict['infos']
+            mu = info['trueskill']['mu']
+            sigma = info['trueskill']['sigma']
+            self.alg.actor_critic.past_ratings_mu.append(mu)
+            self.alg.actor_critic.past_ratings_sigma.append(sigma)
+            self.alg.actor_critic.past_models.append(dict['model_state_dict'])
 
     def get_inference_policy(self, device=None):
         self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)
