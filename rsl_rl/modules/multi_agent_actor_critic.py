@@ -77,7 +77,7 @@ class MAActorCritic():
         for idx in range(num_agents):
             self.agentratings.append((trueskill.Rating(mu=0),))
 
-        self.max_num_models = 25
+        self.max_num_models = 100
         self.past_models = [self.ac1.state_dict()]
         self.past_ratings_mu = [0]
         self.past_ratings_sigma = [self.agentratings[0][0].sigma]
@@ -202,9 +202,10 @@ class MAActorCritic():
         self.past_ratings_mu.append(self.agentratings[0][0].mu)
         self.past_ratings_sigma.append(self.agentratings[0][0].sigma)
         if len(self.past_models)> self.max_num_models:
-            del self.past_models[0]
-            del self.past_ratings_mu[0]
-            del self.past_ratings_sigma[0]
+            idx_del = np.random.randint(0, self.max_num_models-2)
+            del self.past_models[idx_del]
+            del self.past_ratings_mu[idx_del]
+            del self.past_ratings_sigma[idx_del]
 
         #select model to load
         idx = np.random.choice(len(self.past_models), self.num_agents-1)
