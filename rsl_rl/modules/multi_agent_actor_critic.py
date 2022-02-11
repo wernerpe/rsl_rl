@@ -189,7 +189,7 @@ class MAActorCritic():
                 return 
                 
             update_ratio = (len(dones_idx)/len(dones)*torch.mean(infos['percentage_max_episode_length'])).item()
-            new_ratings = trueskill.rate(self.agentratings, avgranking)
+            new_ratings = trueskill.rate(self.agentratings, ranks_final)
             for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
                 mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
                 sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma

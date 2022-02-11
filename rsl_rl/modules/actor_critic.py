@@ -153,3 +153,5 @@ def get_activation(act_name):
     else:
         print("invalid activation function!")
         return None
+
+
