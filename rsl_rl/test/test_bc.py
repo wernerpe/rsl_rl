@@ -15,6 +15,9 @@ from scipy.stats import norm
 
 from rsl_rl.modules import ActorCritic
 
+from datetime import datetime
+from torch.utils.tensorboard import SummaryWriter
+
 
 def train():
     env = DmarEnv(cfg, args)
@@ -52,18 +55,30 @@ def train():
     lossfn = torch.nn.MSELoss().to(env.device)
     optimizer = torch.optim.Adam(ac_ego.parameters(), lr=cfg_train['algorithm']['learning_rate'])
 
+    now = datetime.now()
+    timestamp = now.strftime("%y_%m_%d_%H_%M_%S")
+
+    bc_logdir = os.getcwd() + '/rsl_rl/test/logs' + '/' + timestamp
+    env._writer = SummaryWriter(log_dir=bc_logdir, flush_secs=10)
+    env.log_video_freq = 1
+
     for i in range(num_steps):
         actions = policy(obs)
         values = valuef(obs)
-        obs,_, rew, dones, info = env.step(actions)
 
-        act_ego = actions[:, 0]
-        val_ego = values[:, 0]
-        obs_ego = obs[:, 0]
+        # Replace first action with cloned policy action
+        actions_env0 = torch.concat([ac_ego.actor(obs[0, 0]).unsqueeze(0), actions[0, 1:]])
+        actions_env = torch.concat([actions_env0.unsqueeze(0), actions[1:]])
+        
+        obs,_, rew, dones, info = env.step(actions_env)
+
+        act_ego = actions[1:, 0]
+        val_ego = values[1:, 0]
+        obs_ego = obs[1:, 0]
 
         for _ in range(it_per_data_batch):
             optimizer.zero_grad()
-            loss_train = lossfn(act_ego, ac_ego.actor(obs_ego)) + lossfn(val_ego, ac_ego.critic(obs_ego))
+            loss_train = lossfn(act_ego, ac_ego.actor(obs_ego))  # + lossfn(val_ego, ac_ego.critic(obs_ego))
             loss_train.backward(retain_graph=True)
             optimizer.step()
         progstring = (f"""{'#'*40}\n\n"""
@@ -76,6 +91,10 @@ def train():
         if len(dones_idx):
             num_races += len(dones_idx)
             num_agent_0_wins +=len(torch.where(info['ranking'][:,0] == 0))
+
+            if 0 in dones_idx:
+              print("-----> Logging Video <-----")
+
 
 
 if __name__ == "__main__":
@@ -92,7 +111,7 @@ if __name__ == "__main__":
 
     chkpts = [-1, 18000, 16600, 4000]
     runs = [-1, -1, -1, -1]
-    cfg['sim']['numEnv'] = 1
+    cfg['sim']['numEnv'] = 100
     cfg['sim']['numAgents'] = 4
     cfg['learn']['timeout'] = 300
     cfg['learn']['offtrack_reset'] = 5.0
