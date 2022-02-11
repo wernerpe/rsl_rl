@@ -57,6 +57,8 @@ class ActorCritic(nn.Module):
         # Policy
         actor_layers = []
         actor_layers.append(nn.Linear(mlp_input_dim_a, actor_hidden_dims[0]))
+        # actor_layers.append(nn.LayerNorm(actor_hidden_dims[0]))
+        # actor_layers.append(nn.Tanh())
         actor_layers.append(activation)
         for l in range(len(actor_hidden_dims)):
             if l == len(actor_hidden_dims) - 1:
@@ -69,6 +71,8 @@ class ActorCritic(nn.Module):
         # Value function
         critic_layers = []
         critic_layers.append(nn.Linear(mlp_input_dim_c, critic_hidden_dims[0]))
+        # critic_layers.append(nn.LayerNorm(critic_hidden_dims[0]))
+        # critic_layers.append(nn.Tanh())
         critic_layers.append(activation)
         for l in range(len(critic_hidden_dims)):
             if l == len(critic_hidden_dims) - 1:
