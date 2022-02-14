@@ -77,7 +77,11 @@ class MAActorCritic():
         for idx in range(num_agents):
             self.agentratings.append((trueskill.Rating(mu=0),))
 
-        self.max_num_models = 100
+        self.max_num_models = 40
+        self.draw_probs_unnorm = np.ones((self.max_num_models,))
+        self.draw_probs_unnorm[0:-3] = 0.2/(self.max_num_models-3)
+        self.draw_probs_unnorm[-3:] = 0.8/3
+
         self.past_models = [self.ac1.state_dict()]
         self.past_ratings_mu = [0]
         self.past_ratings_sigma = [self.agentratings[0][0].sigma]
@@ -208,7 +212,13 @@ class MAActorCritic():
             del self.past_ratings_sigma[idx_del]
 
         #select model to load
-        idx = np.random.choice(len(self.past_models), self.num_agents-1)
+        #renormalize dist
+        if len(self.past_models) !=self.max_num_models:
+            prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):]) * self.draw_probs_unnorm[-len(self.past_models):]
+        else:
+            prob = self.draw_probs_unnorm
+
+        idx = np.random.choice(len(self.past_models), self.num_agents-1, p = prob)
         for op_id, past_model_id in enumerate(idx):
 
             state_dict = self.past_models[past_model_id]

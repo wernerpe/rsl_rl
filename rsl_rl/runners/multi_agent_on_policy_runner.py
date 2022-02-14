@@ -35,7 +35,7 @@ import statistics
 
 from torch.utils.tensorboard import SummaryWriter
 import torch
-
+import numpy as np
 from rsl_rl.algorithms import PPO, MAPPO
 from rsl_rl.modules import MAActorCritic, ActorCritic, ActorCriticRecurrent
 from rsl_rl.env import VecEnv
@@ -178,6 +178,9 @@ class MAOnPolicyRunner:
         self.writer.add_scalar('Perf/collection time', locs['collection_time'], locs['it'])
         self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
         self.writer.add_scalar('Agent/Trueskill', self.alg.actor_critic.agentratings[0][0].mu, locs['it'])
+        self.writer.add_scalar('Agent/AvgOpponentTrueskill',
+                               np.mean([self.alg.actor_critic.agentratings[idx + 1][0].mu for idx in range(len(self.alg.actor_critic.agentratings)-1)]), 
+                               locs['it'])
         
         if len(locs['rewbuffer']) > 0:
             self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
