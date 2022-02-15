@@ -140,7 +140,7 @@ class MAActorCritic():
     def act(self, observations, **kwargs):
         actions = []
         actions.append(self.ac1.act(observations[:, 0,:]).unsqueeze(1))
-        op_actions = [ac.act_inference(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
+        op_actions = [ac.act(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
         actions += op_actions 
         actions = torch.cat(tuple(actions), dim = 1)
         return actions
