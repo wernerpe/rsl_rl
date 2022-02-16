@@ -33,7 +33,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from rsl_rl.modules import MAActorCritic
-from rsl_rl.storage import RolloutStorage
+from rsl_rl.storage import RolloutStorage, MultiAgentRolloutStorage
 
 #only track transitions of agent 1, agent 2 blindly runs old version of policy 
 #which gets exchanged periodically for the current version
@@ -69,7 +69,7 @@ class MAPPO:
         self.actor_critic.to(self.device)
         self.storage = None # initialized later
         self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
-        self.transition = RolloutStorage.Transition()
+        self.transition = MultiAgentRolloutStorage.Transition()
 
         # PPO parameters
         self.clip_param = clip_param
@@ -82,8 +82,8 @@ class MAPPO:
         self.max_grad_norm = max_grad_norm
         self.use_clipped_value_loss = use_clipped_value_loss
 
-    def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape):
-        self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, self.device)
+    def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents):
+        self.storage = MultiAgentRolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents, self.device)
 
     def test_mode(self):
         self.actor_critic.test()
@@ -107,10 +107,12 @@ class MAPPO:
         self.transition.observations = obs[:, 0, :]
         self.transition.critic_observations = critic_obs
         return all_agent_actions
-    
+
     def process_env_step(self, rewards, dones, infos):
         self.transition.rewards = rewards.clone()[:, 0]
         self.transition.dones = dones[:, 0]
+        if 'agent_active' in infos:
+          self.transition.active_agents = 1.0 * infos['agent_active']
         # Bootstrapping on time outs
         if 'time_outs' in infos:
             self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
@@ -129,13 +131,15 @@ class MAPPO:
         mean_surrogate_loss = 0
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        elif self.actor_critic.is_attentive:
+          generator = self.storage.attention_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
-            old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
+            old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch, active_agents in generator:
 
 
-                self.actor_critic.act_ac_train(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
+                self.actor_critic.act_ac_train(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0], active_agents=active_agents)
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
                 value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
                 mu_batch = self.actor_critic.action_mean

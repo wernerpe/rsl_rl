@@ -35,7 +35,7 @@ import torch.nn as nn
 from torch.distributions import Normal
 from torch.nn.modules import rnn
 
-class ActorCritic(nn.Module):
+class ActorCriticAttention(nn.Module):
     is_recurrent = False
     def __init__(self,  num_actor_obs,
                         num_critic_obs,
@@ -46,41 +46,43 @@ class ActorCritic(nn.Module):
                         init_noise_std=1.0,
                         **kwargs):
         if kwargs:
-            print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
-        super(ActorCritic, self).__init__()
+            print("ActorCriticAttention.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
+        super(ActorCriticAttention, self).__init__()
 
         activation = get_activation(activation)
 
-        mlp_input_dim_a = num_actor_obs
-        mlp_input_dim_c = num_critic_obs
+        num_agent_max = 4
+        num_ego_obs = 35
+        num_ado_obs = 6
+        mlp_input_dim_a = num_ego_obs + num_ado_obs
+        mlp_input_dim_c = num_ego_obs + num_ado_obs
+
+        # Encoder
+        self.encoder = EncoderAttention(
+          num_ego_obs=num_ego_obs, 
+          num_ado_obs=num_ado_obs, 
+          hidden_dims=actor_hidden_dims, 
+          output_dim=1, 
+          num_agents=num_agent_max,
+          activation=activation
+        )
 
         # Policy
-        actor_layers = []
-        actor_layers.append(nn.Linear(mlp_input_dim_a, actor_hidden_dims[0]))
-        actor_layers.append(nn.LayerNorm(actor_hidden_dims[0]))
-        actor_layers.append(nn.Tanh())
-        # actor_layers.append(activation)
-        for l in range(len(actor_hidden_dims)):
-            if l == len(actor_hidden_dims) - 1:
-                actor_layers.append(nn.Linear(actor_hidden_dims[l], num_actions))
-            else:
-                actor_layers.append(nn.Linear(actor_hidden_dims[l], actor_hidden_dims[l + 1]))
-                actor_layers.append(activation)
-        self.actor = nn.Sequential(*actor_layers)
+        self.actor = ActortAttention(
+          input_dim=mlp_input_dim_a, 
+          hidden_dims=actor_hidden_dims, 
+          output_dim=num_actions, 
+          activation=activation,
+          encoder=self.encoder,
+        )
 
         # Value function
-        critic_layers = []
-        critic_layers.append(nn.Linear(mlp_input_dim_c, critic_hidden_dims[0]))
-        critic_layers.append(nn.LayerNorm(critic_hidden_dims[0]))
-        critic_layers.append(nn.Tanh())
-        # critic_layers.append(activation)
-        for l in range(len(critic_hidden_dims)):
-            if l == len(critic_hidden_dims) - 1:
-                critic_layers.append(nn.Linear(critic_hidden_dims[l], 1))
-            else:
-                critic_layers.append(nn.Linear(critic_hidden_dims[l], critic_hidden_dims[l + 1]))
-                critic_layers.append(activation)
-        self.critic = nn.Sequential(*critic_layers)
+        self.critic = CriticAttention(
+          input_dim=mlp_input_dim_c, 
+          hidden_dims=critic_hidden_dims, 
+          activation=activation,
+          encoder=self.encoder,
+        )
 
         print(f"Actor MLP: {self.actor}")
         print(f"Critic MLP: {self.critic}")
@@ -138,6 +140,100 @@ class ActorCritic(nn.Module):
     def evaluate(self, critic_observations, **kwargs):
         value = self.critic(critic_observations)
         return value
+
+class EncoderAttention(nn.Module):
+
+  def __init__(self, num_ego_obs, num_ado_obs , hidden_dims, output_dim, num_agents, activation):
+
+        super(EncoderAttention, self).__init__()
+
+        self.num_agents = num_agents  # FIXME: pass from AC
+        self.num_ego_obs = num_ego_obs
+        self.num_ado_obs = num_ado_obs
+
+        encoder_layers = []
+        encoder_layers.append(nn.Linear(num_ado_obs, hidden_dims[0]))
+        encoder_layers.append(nn.LayerNorm(hidden_dims[0]))
+        encoder_layers.append(nn.Tanh())
+        # actor_layers.append(activation)
+        for l in range(len(hidden_dims)):
+            if l == len(hidden_dims) - 1:
+                encoder_layers.append(nn.Linear(hidden_dims[l], output_dim))
+            else:
+                encoder_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
+                encoder_layers.append(activation)
+        # TODO: add another activation to constrain output magnitude?
+        self._network = nn.Sequential(*encoder_layers)
+
+  def forward(self, observations):
+
+      obs_ego = observations[..., :self.num_ego_obs]
+      obs_ado = observations[..., self.num_ego_obs:self.num_ego_obs+(self.num_agents-1)*self.num_ado_obs]
+
+      latent = 0.0
+
+      for ado_id in range(self.num_agents-1):
+          ado_ag_obs = obs_ado[..., ado_id::self.num_agents-1]
+          latent += self._network(ado_ag_obs) * ado_ag_obs
+
+      return torch.cat((obs_ego, latent), dim=-1)
+
+
+class ActortAttention(nn.Module):
+  
+    def __init__(self, input_dim, hidden_dims, output_dim, activation, encoder):
+
+        super(ActortAttention, self).__init__()
+
+        self._encoder = encoder
+
+        input_dim = 41  # FIXME: pass from AC
+
+        actor_layers = []
+        actor_layers.append(nn.Linear(input_dim, hidden_dims[0]))
+        actor_layers.append(nn.LayerNorm(hidden_dims[0]))
+        actor_layers.append(nn.Tanh())
+        # actor_layers.append(activation)
+        for l in range(len(hidden_dims)):
+            if l == len(hidden_dims) - 1:
+                actor_layers.append(nn.Linear(hidden_dims[l], output_dim))
+            else:
+                actor_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
+                actor_layers.append(activation)
+        self._network = nn.Sequential(*actor_layers)
+
+    def forward(self, observations):
+        latent = self._encoder(observations)
+        return self._network(latent)
+
+
+class CriticAttention(nn.Module):
+  
+    def __init__(self, input_dim, hidden_dims, activation, encoder):
+
+        super(CriticAttention, self).__init__()
+
+        self._encoder = encoder
+
+        input_dim = 41  # FIXME: pass from AC
+  
+        critic_layers = []
+        critic_layers.append(nn.Linear(input_dim, hidden_dims[0]))
+        critic_layers.append(nn.LayerNorm(hidden_dims[0]))
+        critic_layers.append(nn.Tanh())
+        # critic_layers.append(activation)
+        for l in range(len(hidden_dims)):
+            if l == len(hidden_dims) - 1:
+                critic_layers.append(nn.Linear(hidden_dims[l], 1))
+            else:
+                critic_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
+                critic_layers.append(activation)
+        self._network = nn.Sequential(*critic_layers)
+
+    def forward(self, observations):
+        latent = self._encoder(observations)
+        return self._network(latent)
+
 
 def get_activation(act_name):
     if act_name == "elu":

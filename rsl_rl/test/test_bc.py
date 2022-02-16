@@ -50,10 +50,10 @@ def train():
     num_races = 0
     num_agent_0_wins = 0
 
-    it_per_data_batch = 60
+    it_per_data_batch = 1
     num_steps = 6500
     lossfn = torch.nn.MSELoss().to(env.device)
-    optimizer = torch.optim.Adam(ac_ego.parameters(), lr=cfg_train['algorithm']['learning_rate'])
+    optimizer = torch.optim.Adam(ac_ego.parameters(), lr=1e-3)  #cfg_train['algorithm']['learning_rate'])
 
     now = datetime.now()
     timestamp = now.strftime("%y_%m_%d_%H_%M_%S")
@@ -63,12 +63,17 @@ def train():
     env.log_video_freq = 1
 
     for i in range(num_steps):
-        actions = policy(obs)
-        values = valuef(obs)
+        actions = policy(obs).detach()
+        values = valuef(obs).detach()
 
         # Replace first action with cloned policy action
         actions_env0 = torch.concat([ac_ego.actor(obs[0, 0]).unsqueeze(0), actions[0, 1:]])
         actions_env = torch.concat([actions_env0.unsqueeze(0), actions[1:]])
+        # actions_env = actions
+
+        # Let new policy decide where to go, query supervisor for correction!
+        actions0 = ac_ego.actor(obs[:, 0])
+        actions_env = torch.concat([actions0.unsqueeze(1), actions[:, 1:]], dim=1)
         
         obs,_, rew, dones, info = env.step(actions_env)
 
@@ -78,13 +83,15 @@ def train():
 
         for _ in range(it_per_data_batch):
             optimizer.zero_grad()
-            loss_train = lossfn(act_ego, ac_ego.actor(obs_ego))  # + lossfn(val_ego, ac_ego.critic(obs_ego))
-            loss_train.backward(retain_graph=True)
+            # loss_train = lossfn(act_ego, ac_ego.actor(obs_ego)) + lossfn(val_ego, ac_ego.critic(obs_ego))
+            loss_train = lossfn(actions[:, 0], actions0)  # + lossfn(values[:, 0], ac_ego.critic(obs[:, 0]))
+            loss_train.backward()
             optimizer.step()
-        progstring = (f"""{'#'*40}\n\n"""
-                      f"""{'Step: ':>{10}}{str(i)}{'/'}{str(num_steps)}\n"""
-                      f""" {'Train Error: ':>{10}}{loss_train:.4f}\n""")
-        print(progstring)
+        if i % 100 == 0:
+            progstring = (f"""{'#'*40}\n\n"""
+                          f"""{'Step: ':>{10}}{str(i)}{'/'}{str(num_steps)}\n"""
+                          f""" {'Train Error: ':>{10}}{loss_train:.4f}\n""")
+            print(progstring)
 
         
         dones_idx = torch.unique(torch.where(dones)[0])
@@ -109,9 +116,9 @@ if __name__ == "__main__":
 
     logdir = path_cfg_base + logdir
 
-    chkpts = [-1, 18000, 16600, 4000]
+    chkpts = [18000, 18000, 16600, 4000]
     runs = [-1, -1, -1, -1]
-    cfg['sim']['numEnv'] = 100
+    cfg['sim']['numEnv'] = 1000
     cfg['sim']['numAgents'] = 4
     cfg['learn']['timeout'] = 300
     cfg['learn']['offtrack_reset'] = 5.0

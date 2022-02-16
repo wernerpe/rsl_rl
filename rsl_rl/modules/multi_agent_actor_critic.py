@@ -33,7 +33,7 @@ import numpy as np
 import torch
 from torch.distributions import Normal
 import copy
-from rsl_rl.modules import ActorCritic
+from rsl_rl.modules import ActorCritic, ActorCriticAttention
 import trueskill
 
 #2 agent actor critic
@@ -61,14 +61,15 @@ class MAActorCritic():
         if kwargs:
             print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
         
-        self.ac1 = ActorCritic( num_actor_obs,
-                                num_critic_obs,
-                                num_actions,
-                                actor_hidden_dims,
-                                critic_hidden_dims,
-                                activation,
-                                init_noise_std, 
-                                **kwargs)
+        self.ac1 = ActorCriticAttention(num_actor_obs,
+                                        num_critic_obs,
+                                        num_actions,
+                                        actor_hidden_dims,
+                                        critic_hidden_dims,
+                                        activation,
+                                        init_noise_std, 
+                                        **kwargs)
+        self.is_attentive = True
         
         self.opponent_acs = [copy.deepcopy(self.ac1) for _ in range(num_agents-1)]
         self.is_recurrent = False
@@ -141,7 +142,7 @@ class MAActorCritic():
         actions = torch.cat(tuple(actions), dim = 1)
         return actions
     
-    def act_inference(self, observations):
+    def act_inference(self, observations, **kwargs):
         actions = []
         actions.append(self.ac1.act_inference(observations[:, 0,:]).unsqueeze(1))
         op_actions = [ac.act_inference(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
@@ -156,7 +157,7 @@ class MAActorCritic():
     def get_actions_log_prob(self, actions):
         return self.ac1.distribution.log_prob(actions).sum(dim=-1)
     
-    def evaluate_inference(self, observations):
+    def evaluate_inference(self, observations, **kwargs):
         values = []
         values.append(self.ac1.evaluate(observations[:, 0,:]).unsqueeze(1))
         op_values = [ac.evaluate(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
