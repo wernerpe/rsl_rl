@@ -35,6 +35,9 @@ import torch.nn as nn
 from torch.distributions import Normal
 from torch.nn.modules import rnn
 
+from rsl_rl.modules.attention.encoders import EncoderAttention1, EncoderAttention2
+
+
 class ActorCriticAttention(nn.Module):
     is_recurrent = False
     def __init__(self,  num_actor_obs,
@@ -57,18 +60,21 @@ class ActorCriticAttention(nn.Module):
         mlp_input_dim_a = num_ego_obs + num_ado_obs
         mlp_input_dim_c = num_ego_obs + num_ado_obs
 
+        encoder_type = kwargs['encoder_type']
+        encoder_hidden_dims = kwargs['encoder_hidden_dims']
+
         # Encoder
-        self.encoder = EncoderAttention(
+        self.encoder = get_encoder(
+          encoder_type=encoder_type,
           num_ego_obs=num_ego_obs, 
           num_ado_obs=num_ado_obs, 
-          hidden_dims=actor_hidden_dims, 
-          output_dim=1, 
+          hidden_dims=encoder_hidden_dims, 
           num_agents=num_agent_max,
           activation=activation
         )
 
         # Policy
-        self.actor = ActortAttention(
+        self.actor = ActorAttention(
           input_dim=mlp_input_dim_a, 
           hidden_dims=actor_hidden_dims, 
           output_dim=num_actions, 
@@ -141,49 +147,12 @@ class ActorCriticAttention(nn.Module):
         value = self.critic(critic_observations)
         return value
 
-class EncoderAttention(nn.Module):
 
-  def __init__(self, num_ego_obs, num_ado_obs , hidden_dims, output_dim, num_agents, activation):
-
-        super(EncoderAttention, self).__init__()
-
-        self.num_agents = num_agents  # FIXME: pass from AC
-        self.num_ego_obs = num_ego_obs
-        self.num_ado_obs = num_ado_obs
-
-        encoder_layers = []
-        encoder_layers.append(nn.Linear(num_ado_obs, hidden_dims[0]))
-        encoder_layers.append(nn.LayerNorm(hidden_dims[0]))
-        encoder_layers.append(nn.Tanh())
-        # actor_layers.append(activation)
-        for l in range(len(hidden_dims)):
-            if l == len(hidden_dims) - 1:
-                encoder_layers.append(nn.Linear(hidden_dims[l], output_dim))
-            else:
-                encoder_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
-                encoder_layers.append(activation)
-        # TODO: add another activation to constrain output magnitude?
-        self._network = nn.Sequential(*encoder_layers)
-
-  def forward(self, observations):
-
-      obs_ego = observations[..., :self.num_ego_obs]
-      obs_ado = observations[..., self.num_ego_obs:self.num_ego_obs+(self.num_agents-1)*self.num_ado_obs]
-
-      latent = 0.0
-
-      for ado_id in range(self.num_agents-1):
-          ado_ag_obs = obs_ado[..., ado_id::self.num_agents-1]
-          latent += self._network(ado_ag_obs) * ado_ag_obs
-
-      return torch.cat((obs_ego, latent), dim=-1)
-
-
-class ActortAttention(nn.Module):
+class ActorAttention(nn.Module):
   
     def __init__(self, input_dim, hidden_dims, output_dim, activation, encoder):
 
-        super(ActortAttention, self).__init__()
+        super(ActorAttention, self).__init__()
 
         self._encoder = encoder
 
@@ -193,7 +162,6 @@ class ActortAttention(nn.Module):
         actor_layers.append(nn.Linear(input_dim, hidden_dims[0]))
         actor_layers.append(nn.LayerNorm(hidden_dims[0]))
         actor_layers.append(nn.Tanh())
-        # actor_layers.append(activation)
         for l in range(len(hidden_dims)):
             if l == len(hidden_dims) - 1:
                 actor_layers.append(nn.Linear(hidden_dims[l], output_dim))
@@ -221,7 +189,6 @@ class CriticAttention(nn.Module):
         critic_layers.append(nn.Linear(input_dim, hidden_dims[0]))
         critic_layers.append(nn.LayerNorm(hidden_dims[0]))
         critic_layers.append(nn.Tanh())
-        # critic_layers.append(activation)
         for l in range(len(hidden_dims)):
             if l == len(hidden_dims) - 1:
                 critic_layers.append(nn.Linear(hidden_dims[l], 1))
@@ -233,6 +200,27 @@ class CriticAttention(nn.Module):
     def forward(self, observations):
         latent = self._encoder(observations)
         return self._network(latent)
+
+
+def get_encoder(encoder_type, num_ego_obs, num_ado_obs, hidden_dims, num_agents, activation):
+    if encoder_type=="attention1":
+        return EncoderAttention1(
+          num_ego_obs=num_ego_obs, 
+          num_ado_obs=num_ado_obs, 
+          hidden_dims=hidden_dims, 
+          output_dim=1, 
+          num_agents=num_agents,
+          activation=activation
+        )
+    elif encoder_type=="attention2":
+        return EncoderAttention2(
+          num_ego_obs=num_ego_obs, 
+          num_ado_obs=num_ado_obs, 
+          hidden_dims=hidden_dims, 
+          output_dim=1, 
+          num_agents=num_agents,
+          activation=activation
+        )
 
 
 def get_activation(act_name):
