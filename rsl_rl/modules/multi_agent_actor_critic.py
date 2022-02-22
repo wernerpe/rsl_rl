@@ -186,7 +186,7 @@ class MAActorCritic():
         #update performance metrics of current policies
         if 'ranking' in infos:         
             dones_idx = torch.unique(torch.where(dones)[0])
-            avgranking = torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
+            avgranking = torch.mean(1.0*infos['ranking'][:, self.env_perm], dim = 0).cpu().numpy()
             agent_of_rank = np.argsort(avgranking)
 
             ranks_final = 0*agent_of_rank
