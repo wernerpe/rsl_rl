@@ -56,6 +56,7 @@ class MAPPO:
                  schedule="fixed",
                  desired_kl=0.01,
                  device='cpu',
+                 reshuffle_period = 20 
                  ):
 
         self.device = device
@@ -81,6 +82,8 @@ class MAPPO:
         self.lam = lam
         self.max_grad_norm = max_grad_norm
         self.use_clipped_value_loss = use_clipped_value_loss
+        self.reshuffle_period = reshuffle_period
+        self.num_updates = 0
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape):
         self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, self.device)
@@ -190,7 +193,9 @@ class MAPPO:
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
         self.storage.clear()
-        self.actor_critic._reshuffle_trained_env()
+        self.num_updates +=1
+        if self.num_updates % self.reshuffle_period:
+            self.actor_critic._reshuffle_trained_env()
         return mean_value_loss, mean_surrogate_loss
 
     def update_population(self,):
