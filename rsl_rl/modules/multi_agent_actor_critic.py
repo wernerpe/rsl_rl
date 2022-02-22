@@ -85,10 +85,7 @@ class MAActorCritic():
         self.past_models = [self.ac1.state_dict()]
         self.past_ratings_mu = [0]
         self.past_ratings_sigma = [self.agentratings[0][0].sigma]
-        perm = np.random.permutation(self.num_agents)    
-        inv_perm = np.argsort(perm)
-        self.env_perm = torch.tensor(perm, dtype=torch.long, device=self.device)
-        self.env_inv_perm = torch.tensor(inv_perm, dtype=torch.long, device=self.device)
+        self._reshuffle_trained_env()
     
     def reset(self, dones=None):
         pass
@@ -118,11 +115,9 @@ class MAActorCritic():
 
     def _reshuffle_trained_env(self,):
         #selcts new permutation to avoid agents learning which agent slot is being trained
-        perm = np.random.permutation(self.num_agents)    
-        inv_perm = np.argsort(perm)
-        self.env_perm = torch.tensor(perm, dtype=torch.long, device=self.device)
-        self.env_inv_perm = torch.tensor(inv_perm, dtype=torch.long, device=self.device)
-    
+        self.env_perm = np.random.permutation(self.num_agents)    
+        self.env_inv_perm = np.argsort(self.env_perm)
+        
     def load_state_dict(self, path):
         self.ac1.load_state_dict(path)
         for ac in self.opponent_acs:

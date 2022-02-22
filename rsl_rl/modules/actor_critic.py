@@ -117,8 +117,9 @@ class ActorCritic(nn.Module):
         return self.distribution.entropy().sum(dim=-1)
 
     def update_distribution(self, observations):
-        mean = self.actor(observations)
-        self.distribution = Normal(mean, mean*0. + self.std)
+            mean = self.actor(observations)
+            self.distribution = Normal(mean, mean*0. + self.std)
+        
 
     def act(self, observations, **kwargs):
         self.update_distribution(observations)

@@ -94,22 +94,21 @@ class MAPPO:
     def act(self, obs, critic_obs):
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
-        
         # Compute the actions and values
         all_agent_actions =  self.actor_critic.act(obs).detach()
-        self.transition.actions = all_agent_actions[:, self.actor_critic.env_inv_perm[0], :]
-        self.transition.values = self.actor_critic.evaluate(critic_obs[:, self.actor_critic.env_inv_perm[0], :]).detach()
+        self.transition.actions = all_agent_actions[:, self.actor_critic.env_perm[0], :]
+        self.transition.values = self.actor_critic.evaluate(critic_obs[:, self.actor_critic.env_perm[0], :]).detach()
         #only record log prob of actions from net to train
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()
         self.transition.action_sigma = self.actor_critic.action_std.detach()
         # need to record obs and critic_obs before env.step()
-        self.transition.observations = obs[:, self.actor_critic.env_inv_perm[0], :]
-        self.transition.critic_observations = critic_obs
+        self.transition.observations = obs[:, self.actor_critic.env_perm[0], :]
+        self.transition.critic_observations = critic_obs[:, self.actor_critic.env_perm[0], :]
         return all_agent_actions
     
     def process_env_step(self, rewards, dones, infos):
-        self.transition.rewards = rewards.clone()[:, self.actor_critic.env_inv_perm[0]]
+        self.transition.rewards = rewards.clone()[:, self.actor_critic.env_perm[0]]
         self.transition.dones = dones[:, 0]
         # Bootstrapping on time outs
         if 'time_outs' in infos:
@@ -121,7 +120,7 @@ class MAPPO:
         self.actor_critic.reset(dones)
     
     def compute_returns(self, last_critic_obs):
-        last_values = self.actor_critic.evaluate(last_critic_obs[:, self.actor_critic.env_inv_perm[0], :]).detach()
+        last_values = self.actor_critic.evaluate(last_critic_obs[:, self.actor_critic.env_perm[0], :]).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
     def update(self):
@@ -133,8 +132,7 @@ class MAPPO:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
-
-
+            
                 self.actor_critic.act_ac_train(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
                 value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
@@ -160,6 +158,8 @@ class MAPPO:
 
                 # Surrogate loss
                 ratio = torch.exp(actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch))
+                if torch.any(torch.isnan(ratio)) or torch.any(torch.isinf(ratio)):
+                        print('nan detected')
                 surrogate = -torch.squeeze(advantages_batch) * ratio
                 surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(ratio, 1.0 - self.clip_param,
                                                                                 1.0 + self.clip_param)
@@ -182,10 +182,10 @@ class MAPPO:
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
                 self.optimizer.step()
-
+                
                 mean_value_loss += value_loss.item()
                 mean_surrogate_loss += surrogate_loss.item()
-
+               
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
