@@ -97,19 +97,19 @@ class MAPPO:
         
         # Compute the actions and values
         all_agent_actions =  self.actor_critic.act(obs).detach()
-        self.transition.actions = all_agent_actions[:, 0, :]
-        self.transition.values = self.actor_critic.evaluate(critic_obs[:, 0, :]).detach()
+        self.transition.actions = all_agent_actions[:, self.actor_critic.env_inv_perm[0], :]
+        self.transition.values = self.actor_critic.evaluate(critic_obs[:, self.actor_critic.env_inv_perm[0], :]).detach()
         #only record log prob of actions from net to train
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()
         self.transition.action_sigma = self.actor_critic.action_std.detach()
         # need to record obs and critic_obs before env.step()
-        self.transition.observations = obs[:, 0, :]
+        self.transition.observations = obs[:, self.actor_critic.env_inv_perm[0], :]
         self.transition.critic_observations = critic_obs
         return all_agent_actions
     
     def process_env_step(self, rewards, dones, infos):
-        self.transition.rewards = rewards.clone()[:, 0]
+        self.transition.rewards = rewards.clone()[:, self.actor_critic.env_inv_perm[0]]
         self.transition.dones = dones[:, 0]
         # Bootstrapping on time outs
         if 'time_outs' in infos:
@@ -121,7 +121,7 @@ class MAPPO:
         self.actor_critic.reset(dones)
     
     def compute_returns(self, last_critic_obs):
-        last_values = self.actor_critic.evaluate(last_critic_obs[:, 0, :]).detach()
+        last_values = self.actor_critic.evaluate(last_critic_obs[:, self.actor_critic.env_inv_perm[0], :]).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
     def update(self):
@@ -190,7 +190,7 @@ class MAPPO:
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
         self.storage.clear()
-
+        self.actor_critic._reshuffle_trained_env()
         return mean_value_loss, mean_surrogate_loss
 
     def update_population(self,):

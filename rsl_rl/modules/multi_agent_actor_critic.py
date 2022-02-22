@@ -72,7 +72,7 @@ class MAActorCritic():
         
         self.opponent_acs = [copy.deepcopy(self.ac1) for _ in range(num_agents-1)]
         self.is_recurrent = False
-
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.agentratings = []
         for idx in range(num_agents):
             self.agentratings.append((trueskill.Rating(mu=0),))
@@ -85,7 +85,11 @@ class MAActorCritic():
         self.past_models = [self.ac1.state_dict()]
         self.past_ratings_mu = [0]
         self.past_ratings_sigma = [self.agentratings[0][0].sigma]
-
+        perm = np.random.permutation(self.num_agents)    
+        inv_perm = np.argsort(perm)
+        self.env_perm = torch.tensor(perm, dtype=torch.long, device=self.device)
+        self.env_inv_perm = torch.tensor(inv_perm, dtype=torch.long, device=self.device)
+    
     def reset(self, dones=None):
         pass
 
@@ -111,6 +115,13 @@ class MAActorCritic():
     @property
     def parameters(self):
         return self.ac1.parameters
+
+    def _reshuffle_trained_env(self,):
+        #selcts new permutation to avoid agents learning which agent slot is being trained
+        perm = np.random.permutation(self.num_agents)    
+        inv_perm = np.argsort(perm)
+        self.env_perm = torch.tensor(perm, dtype=torch.long, device=self.device)
+        self.env_inv_perm = torch.tensor(inv_perm, dtype=torch.long, device=self.device)
     
     def load_state_dict(self, path):
         self.ac1.load_state_dict(path)
@@ -132,6 +143,7 @@ class MAActorCritic():
        return None
     
     def to(self, device):
+        self.device = device
         self.ac1.to(device)
         for ac in self.opponent_acs:
             ac.to(device)
@@ -139,13 +151,16 @@ class MAActorCritic():
 
     def act(self, observations, **kwargs):
         actions = []
-        actions.append(self.ac1.act(observations[:, 0,:]).unsqueeze(1))
-        op_actions = [ac.act(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
+        obs = observations[:, self.env_perm, :]
+        actions.append(self.ac1.act(obs[:, 0,:]).unsqueeze(1))
+        op_actions = [ac.act(obs[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
         actions += op_actions 
-        actions = torch.cat(tuple(actions), dim = 1)
+        actions = torch.cat(tuple(actions), dim = 1)[:, self.env_inv_perm, :]
         return actions
     
     def act_inference(self, observations):
+        self.env_inv_perm = np.arange(self.num_agents)
+        self.env_perm = np.arange(self.num_agents)
         actions = []
         actions.append(self.ac1.act_inference(observations[:, 0,:]).unsqueeze(1))
         op_actions = [ac.act_inference(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
