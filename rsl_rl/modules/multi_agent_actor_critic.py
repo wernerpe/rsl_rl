@@ -61,13 +61,14 @@ class MAActorCritic():
         if kwargs:
             print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
         
-        self.ac1 = ActorCriticAttention(num_actor_obs,
-                                        num_critic_obs,
-                                        num_actions,
-                                        actor_hidden_dims,
-                                        critic_hidden_dims,
-                                        activation,
-                                        init_noise_std, 
+        self.ac1 = ActorCriticAttention(num_ego_obs=35,
+                                        num_ado_obs=6,
+                                        num_actions=num_actions,
+                                        num_agents=num_agents,
+                                        actor_hidden_dims=actor_hidden_dims,
+                                        critic_hidden_dims=critic_hidden_dims,
+                                        activation=activation,
+                                        init_noise_std=init_noise_std, 
                                         **kwargs)
         self.is_attentive = True
         
@@ -174,23 +175,9 @@ class MAActorCritic():
         if 'ranking' in infos:         
             dones_idx = torch.unique(torch.where(dones)[0])
             avgranking = torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
-            agent_of_rank = np.argsort(avgranking)
-
-            ranks_final = 0*agent_of_rank
-            for idx, env in enumerate(agent_of_rank[1:]):
-                #avg(env (rank i))- avg(env (rank i-1))>eps 
-                if avgranking[env]- avgranking[agent_of_rank[idx]]  > 0.2:
-                    ranks_final[env] = ranks_final[agent_of_rank[idx]] + 1 
-                else:
-                    ranks_final[env] = ranks_final[agent_of_rank[idx]]
-            ranks_final = (ranks_final).tolist()
-            
-            if ranks_final[0] == ranks_final[1] and self.num_agents == 2:
-                #dont update ratings on ties for 1v1 because leads to unstable behavior
-                return 
-                
+          
             update_ratio = (len(dones_idx)/len(dones)*torch.mean(infos['percentage_max_episode_length'])).item()
-            new_ratings = trueskill.rate(self.agentratings, ranks_final)
+            new_ratings = trueskill.rate(self.agentratings, avgranking)
             for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
                 mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
                 sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma

@@ -40,9 +40,10 @@ from rsl_rl.modules.attention.encoders import EncoderAttention1, EncoderAttentio
 
 class ActorCriticAttention(nn.Module):
     is_recurrent = False
-    def __init__(self,  num_actor_obs,
-                        num_critic_obs,
+    def __init__(self,  num_ego_obs,
+                        num_ado_obs,
                         num_actions,
+                        num_agents,
                         actor_hidden_dims=[256, 256, 256],
                         critic_hidden_dims=[256, 256, 256],
                         activation='elu',
@@ -54,9 +55,9 @@ class ActorCriticAttention(nn.Module):
 
         activation = get_activation(activation)
 
-        num_agent_max = 4
-        num_ego_obs = 35
-        num_ado_obs = 6
+        num_agent_max = num_agents
+        num_ego_obs = num_ego_obs
+        num_ado_obs = num_ado_obs
         mlp_input_dim_a = num_ego_obs + num_ado_obs
         mlp_input_dim_c = num_ego_obs + num_ado_obs
 
@@ -156,8 +157,6 @@ class ActorAttention(nn.Module):
 
         self._encoder = encoder
 
-        input_dim = 41  # FIXME: pass from AC
-
         actor_layers = []
         actor_layers.append(nn.Linear(input_dim, hidden_dims[0]))
         actor_layers.append(nn.LayerNorm(hidden_dims[0]))
@@ -182,8 +181,6 @@ class CriticAttention(nn.Module):
         super(CriticAttention, self).__init__()
 
         self._encoder = encoder
-
-        input_dim = 41  # FIXME: pass from AC
   
         critic_layers = []
         critic_layers.append(nn.Linear(input_dim, hidden_dims[0]))

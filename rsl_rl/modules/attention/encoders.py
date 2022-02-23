@@ -70,7 +70,7 @@ class EncoderAttention2(nn.Module):
       latent = 0.0
 
       for ado_id in range(self.num_agents-1):
-          ado_ag_obs = obs_ado[..., ado_id::self.num_agents-1]
+          ado_ag_obs = obs_ado[..., ado_id::(self.num_agents-1)]
           latent += self._network(torch.cat((obs_ego, ado_ag_obs), dim=-1)) * ado_ag_obs
 
       return torch.cat((obs_ego, latent), dim=-1)
