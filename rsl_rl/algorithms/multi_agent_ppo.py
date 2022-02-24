@@ -194,7 +194,7 @@ class MAPPO:
         mean_surrogate_loss /= num_updates
         self.storage.clear()
         self.num_updates +=1
-        if self.num_updates % self.reshuffle_period:
+        if self.num_updates % self.reshuffle_period == 0:
             self.actor_critic._reshuffle_trained_env()
         return mean_value_loss, mean_surrogate_loss
 
