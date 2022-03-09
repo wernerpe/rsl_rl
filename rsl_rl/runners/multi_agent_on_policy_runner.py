@@ -80,6 +80,9 @@ class MAOnPolicyRunner:
         self.tot_timesteps = 0
         self.tot_time = 0
         self.current_learning_iteration = 0
+        
+        #rating
+        self.rating_update_period = self.cfg['rating_update_period']
 
         _, _ = self.env.reset()
     
@@ -125,7 +128,8 @@ class MAOnPolicyRunner:
                         cur_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
 
-                    self.alg.actor_critic.update_ac_ratings(dones, infos)
+                    if i%self.rating_update_period == 0:
+                        self.alg.actor_critic.update_ac_ratings(infos)
 
                 stop = time.time()
                 collection_time = stop - start
