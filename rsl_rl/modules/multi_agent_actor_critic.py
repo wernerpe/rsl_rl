@@ -175,7 +175,8 @@ class MAActorCritic():
     def update_ac_ratings(self, infos):
         #update performance metrics of current policies
         if 'ranking' in infos:         
-            avgranking = infos['ranking'].cpu().numpy() #torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
+            avgranking = infos['ranking'][0].cpu().numpy() #torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
+            update_ratio = infos['ranking'][1]
             # agent_of_rank = np.argsort(avgranking)
 
             # ranks_final = 0*agent_of_rank
@@ -192,12 +193,12 @@ class MAActorCritic():
             #     return 
                 
             #update_ratio = (len(dones_idx)/len(dones)*torch.mean(infos['percentage_max_episode_length'])).item()
-            self.agentratings = trueskill.rate(self.agentratings, avgranking)
+            new_ratings = trueskill.rate(self.agentratings, avgranking)
             
-            # for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
-            #     mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
-            #     sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
-            #     self.agentratings[it] = (trueskill.Rating(mu, sigma),)
+            for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
+                mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
+                sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
+                self.agentratings[it] = (trueskill.Rating(mu, sigma),)
 
     def redraw_ac_networks(self):
         #update population of competing agents, here simply load 
