@@ -79,8 +79,8 @@ class MAActorCritic():
 
         self.max_num_models = 40
         self.draw_probs_unnorm = np.ones((self.max_num_models,))
-        self.draw_probs_unnorm[0:-3] = 0.2/(self.max_num_models-3)
-        self.draw_probs_unnorm[-3:] = 0.8/3
+        self.draw_probs_unnorm[0:-3] = 0.4/(self.max_num_models-3)
+        self.draw_probs_unnorm[-3:] = 0.6/3
 
         self.past_models = [self.ac1.state_dict()]
         self.past_ratings_mu = [0]
