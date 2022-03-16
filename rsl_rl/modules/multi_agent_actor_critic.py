@@ -36,7 +36,6 @@ import copy
 from rsl_rl.modules import ActorCritic, ActorCriticAttention
 import trueskill
 
-#2 agent actor critic
 class MAActorCritic():
     def __init__(self,  num_actor_obs,
                         num_critic_obs,
@@ -57,20 +56,30 @@ class MAActorCritic():
         self.activation = activation
         self.init_noise_std = init_noise_std
         self.kwargs = kwargs
+        self.is_attentive = kwargs['attentive']
 
-        if kwargs:
-            print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
+        if self.is_attentive:
+            self.ac1 = ActorCriticAttention(num_ego_obs=35,
+                                            num_ado_obs=6,
+                                            num_actions=num_actions,
+                                            num_agents=num_agents,
+                                            actor_hidden_dims=actor_hidden_dims,
+                                            critic_hidden_dims=critic_hidden_dims,
+                                            activation=activation,
+                                            init_noise_std=init_noise_std, 
+                                            **kwargs)
+        else:
+            self.ac1 = ActorCritic( num_actor_obs,
+                                    num_critic_obs,
+                                    num_actions,
+                                    actor_hidden_dims,
+                                    critic_hidden_dims,
+                                    activation,
+                                    init_noise_std, 
+                                    **kwargs)
+#        if kwargs:
+#            print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
         
-        self.ac1 = ActorCriticAttention(num_ego_obs=35,
-                                        num_ado_obs=6,
-                                        num_actions=num_actions,
-                                        num_agents=num_agents,
-                                        actor_hidden_dims=actor_hidden_dims,
-                                        critic_hidden_dims=critic_hidden_dims,
-                                        activation=activation,
-                                        init_noise_std=init_noise_std, 
-                                        **kwargs)
-        self.is_attentive = True
         
         self.opponent_acs = [copy.deepcopy(self.ac1) for _ in range(num_agents-1)]
         self.is_recurrent = False
@@ -79,7 +88,11 @@ class MAActorCritic():
         for idx in range(num_agents):
             self.agentratings.append((trueskill.Rating(mu=0),))
 
-        self.max_num_models = 100
+        self.max_num_models = 40
+        self.draw_probs_unnorm = np.ones((self.max_num_models,))
+        self.draw_probs_unnorm[0:-3] = 0.4/(self.max_num_models-3)
+        self.draw_probs_unnorm[-3:] = 0.6/3
+
         self.past_models = [self.ac1.state_dict()]
         self.past_ratings_mu = [0]
         self.past_ratings_sigma = [self.agentratings[0][0].sigma]
@@ -170,13 +183,11 @@ class MAActorCritic():
         value = self.ac1.critic(critic_observations)
         return value
 
-    def update_ac_ratings(self, dones, infos):
+    def update_ac_ratings(self, infos):
         #update performance metrics of current policies
         if 'ranking' in infos:         
-            dones_idx = torch.unique(torch.where(dones)[0])
-            avgranking = torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
-          
-            update_ratio = (len(dones_idx)/len(dones)*torch.mean(infos['percentage_max_episode_length'])).item()
+            avgranking = infos['ranking'][0].cpu().numpy() #torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
+            update_ratio = infos['ranking'][1]
             new_ratings = trueskill.rate(self.agentratings, avgranking)
             for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
                 mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
@@ -196,7 +207,13 @@ class MAActorCritic():
             del self.past_ratings_sigma[idx_del]
 
         #select model to load
-        idx = np.random.choice(len(self.past_models), self.num_agents-1)
+        #renormalize dist
+        if len(self.past_models) !=self.max_num_models:
+            prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):]) * self.draw_probs_unnorm[-len(self.past_models):]
+        else:
+            prob = self.draw_probs_unnorm
+
+        idx = np.random.choice(len(self.past_models), self.num_agents-1, p = prob)
         for op_id, past_model_id in enumerate(idx):
 
             state_dict = self.past_models[past_model_id]
