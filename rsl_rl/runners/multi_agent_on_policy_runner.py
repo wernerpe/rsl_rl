@@ -36,8 +36,8 @@ import statistics
 from torch.utils.tensorboard import SummaryWriter
 import torch
 
-from rsl_rl.algorithms import PPO, MAPPO
-from rsl_rl.modules import MAActorCritic, ActorCritic, ActorCriticRecurrent
+from rsl_rl.algorithms import PPO, IMAPPO
+from rsl_rl.modules import MAActorCritic
 from rsl_rl.env import VecEnv
 
 
@@ -60,13 +60,13 @@ class MAOnPolicyRunner:
         else:
             num_critic_obs = self.env.num_obs
         actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCritic
-        actor_critic: MAActorCritic = actor_critic_class( self.env.num_obs,
+        actor_critic = actor_critic_class( self.env.num_obs,
                                                         num_critic_obs,
                                                         num_agents,
                                                         self.env.num_actions,
                                                         **self.policy_cfg).to(self.device)
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
-        self.alg: MAPPO = alg_class(actor_critic, device=self.device, **self.alg_cfg)
+        self.alg = alg_class(actor_critic, device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.population_update_interval = self.cfg["population_update_interval"]
         self.save_interval = self.cfg["save_interval"]
@@ -125,7 +125,7 @@ class MAOnPolicyRunner:
                         cur_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
 
-                    self.alg.actor_critic.update_ac_ratings( infos)
+                    self.alg.actor_critic.update_ac_ratings(infos)
 
                 stop = time.time()
                 collection_time = stop - start
