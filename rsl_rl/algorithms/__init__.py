@@ -29,4 +29,4 @@
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
 from .ppo import PPO
-from .multi_agent_ppo import MAPPO
+from .independent_multi_agent_ppo import IMAPPO
