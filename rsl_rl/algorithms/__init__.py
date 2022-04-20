@@ -30,3 +30,4 @@
 
 from .ppo import PPO
 from .independent_multi_agent_ppo import IMAPPO
+from .joint_ratio_multi_agent_ppo import JRMAPPO

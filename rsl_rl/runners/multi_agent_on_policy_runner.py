@@ -36,8 +36,8 @@ import statistics
 from torch.utils.tensorboard import SummaryWriter
 import torch
 
-from rsl_rl.algorithms import PPO, IMAPPO
-from rsl_rl.modules import MAActorCritic
+from rsl_rl.algorithms import PPO, IMAPPO, JRMAPPO
+from rsl_rl.modules import MAActorCritic, CMAActorCritic
 from rsl_rl.env import VecEnv
 
 
@@ -60,12 +60,15 @@ class MAOnPolicyRunner:
         else:
             num_critic_obs = self.env.num_obs
         actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCritic
+        if self.cfg["algorithm_class_name"] == 'JRMAPPO' and self.cfg["policy_class_name"] != 'CMAActorCritic':
+            raise NotImplementedError
+
         actor_critic = actor_critic_class( self.env.num_obs,
                                                         num_critic_obs,
                                                         num_agents,
                                                         self.env.num_actions,
                                                         **self.policy_cfg).to(self.device)
-        alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
+        alg_class = eval(self.cfg["algorithm_class_name"]) 
         self.alg = alg_class(actor_critic, device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.population_update_interval = self.cfg["population_update_interval"]

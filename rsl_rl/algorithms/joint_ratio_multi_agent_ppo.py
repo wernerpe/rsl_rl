@@ -3,15 +3,15 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from rsl_rl.modules import MAActorCritic
-from rsl_rl.storage import MultiAgentRolloutStorage
+from rsl_rl.modules import CMAActorCritic
+from rsl_rl.storage import CentralizedMultiAgentRolloutStorage
 
 #only track transitions of agent 1, agent 2 blindly runs old version of policy 
 #which gets exchanged periodically for the current version
 #generator of multi agent rollout storage only returns data on agent 1
 
 class JRMAPPO:
-    actor_critic: MAActorCritic
+    actor_critic: CMAActorCritic
     def __init__(self,
                  actor_critic,
                  num_learning_epochs=1,
@@ -40,7 +40,7 @@ class JRMAPPO:
         self.actor_critic.to(self.device)
         self.storage = None # initialized later
         self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
-        self.transition = MultiAgentRolloutStorage.Transition()
+        self.transition = CentralizedMultiAgentRolloutStorage.Transition()
 
         # PPO parameters
         self.clip_param = clip_param
@@ -54,7 +54,7 @@ class JRMAPPO:
         self.use_clipped_value_loss = use_clipped_value_loss
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents):
-        self.storage = MultiAgentRolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents, self.device)
+        self.storage = CentralizedMultiAgentRolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents, self.device)
 
     def test_mode(self):
         self.actor_critic.test()
