@@ -36,11 +36,20 @@ from torch.distributions import Normal
 from torch.nn.modules import rnn
 
 class Actor(nn.Module):
-    def __init__(self,):
+    def __init__(self,  num_actor_obs,
+                        num_actions,
+                        actor_hidden_dims=[256, 256, 256],
+                        activation='elu',
+                        init_noise_std=1.0,
+                        **kwargs):
+        ###PUT CODE HERE
+        
         pass
 
-class Critic(nn.Module):
+class StrucutredCritic(nn.Module):
     def __init__(self,):
+        ###PUT CODE HERE
+        #look for CMAAC class for available params such as input output dimensios etc
         pass
 
 

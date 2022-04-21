@@ -1,6 +1,6 @@
 import numpy as np
-
 import torch
+import torch.nn as nn
 from torch.distributions import Normal
 import copy
 from rsl_rl.modules import ActorCritic, ActorCriticAttention, Actor, Critic, ActorAttention, CriticAttention
@@ -232,6 +232,7 @@ class MultiTeamCMAAC():
         self.teamacs = [CMAActorCritic(num_actor_obs,
                                        num_critic_obs,
                                        num_actions,
+                                       num_agents, 
                                        actor_hidden_dims=[256, 256, 256],
                                        critic_hidden_dims=[256, 256, 256],
                                        activation='elu',
@@ -244,7 +245,7 @@ class MultiTeamCMAAC():
     def forward(self):
         raise NotImplementedError
 
-     @property
+    @property
     def action_mean(self):
         return self.teamacs[0].distribution.mean
 
@@ -368,12 +369,15 @@ class CMAActorCritic(nn.Module):
     def __init__(self,  num_actor_obs,
                         num_critic_obs,
                         num_actions,
+                        num_agents,
                         actor_hidden_dims=[256, 256, 256],
                         critic_hidden_dims=[256, 256, 256],
                         activation='elu',
                         init_noise_std=1.0,
                         **kwargs):
 
+        #Adapt ac interface here -------
+        
         super(CMAActorCritic, self).__init__()
         self.num_actor_obs = num_actor_obs
         self.num_critic_obs = num_critic_obs
@@ -388,27 +392,17 @@ class CMAActorCritic(nn.Module):
         self.team_size = kwargs['teamsize']
 
         if self.is_attentive:
-            self.actor = ActorAttention(num_ego_obs=35,
+            self.ac = ActorCriticAttention(num_ego_obs=35,
                                         num_ado_obs=6,
                                         num_actions=num_actions,
-                                        #num_agents=num_agents,
+                                        num_agents=num_agents,
                                         actor_hidden_dims=actor_hidden_dims,
                                         critic_hidden_dims=critic_hidden_dims,
                                         activation=activation,
                                         init_noise_std=init_noise_std, 
                                         **kwargs)
-
-            self.critic = CriticAttention(num_ego_obs=35,
-                                          num_ado_obs=6,
-                                          num_actions=num_actions,
-                                          #num_outputs=self.team_size,
-                                          actor_hidden_dims=actor_hidden_dims,
-                                          critic_hidden_dims=critic_hidden_dims,
-                                          activation=activation,
-                                          init_noise_std=init_noise_std, 
-                                          **kwargs))
         else:
-            self.actors = Actor( num_actor_obs,
+            self.ac = ActorCritic( num_actor_obs,
                                  num_critic_obs,
                                  num_actions,
                                  actor_hidden_dims,
@@ -417,15 +411,7 @@ class CMAActorCritic(nn.Module):
                                  init_noise_std, 
                                  **kwargs)
 
-            self.critic = Critic(num_ego_obs=35,
-                                          num_ado_obs=6,
-                                          num_actions=num_actions,
-                                          #num_outputs=self.team_size,
-                                          actor_hidden_dims=actor_hidden_dims,
-                                          critic_hidden_dims=critic_hidden_dims,
-                                          activation=activation,
-                                          init_noise_std=init_noise_std, 
-                                          **kwargs))
+            
 #        if kwargs:
 #            print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
         
@@ -453,19 +439,19 @@ class CMAActorCritic(nn.Module):
     
     @property
     def action_mean(self):
-        return self.actor.distribution.mean
+        return self.ac.actor.distribution.mean
 
     @property
     def action_std(self):
-        return self.actor.distribution.stddev
+        return self.ac.actor.distribution.stddev
     
     @property
     def std(self):
-        return self.actor.std
+        return self.ac.actor.std
 
     @property
     def entropy(self):
-        return self.actor.distribution.entropy().sum(dim=-1)
+        return self.ac.actor.distribution.entropy().sum(dim=-1)
     
     #not sure how to fix these
     #@property
@@ -478,34 +464,31 @@ class CMAActorCritic(nn.Module):
     #        ac.load_state_dict(path)
 
     def eval(self):
-        self.actor.eval()
-        self.critic.eval()
-
+        self.ac.eval()
+        
     def train(self):
-       self.actor.train()
-       self.critic.train()
-       return None
+        self.ac.train()
+        return None
     
     def to(self, device):
-        self.actor.to(device)
-        self.critic.to(device)
+        self.ac.to(device)
         return self
 
     def act(self, observations, **kwargs):
-        actions = torch.cat(tuple([self.actor.act(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
+        actions = torch.cat(tuple([self.ac.actor.act(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
         return actions
     
     def act_inference(self, observations, **kwargs):
-        actions = torch.cat(tuple([self.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
+        actions = torch.cat(tuple([self.ac.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
         return actions
     
     def get_actions_log_prob(self, actions):
-        actions = torch.cat(tuple([self.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
-        return self.actor.distribution.log_prob(actions).sum(dim=-1)
+        actions = torch.cat(tuple([self.ac.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
+        return self.ac.actor.distribution.log_prob(actions).sum(dim=-1)
     
     def evaluate_inference(self, observations, **kwargs):
         values = []
-        values.append(self.ac1.evaluate(observations[:, 0,:]).unsqueeze(1))
+        values = [self.ac.evaluate(observations[:, 0,:])]
         op_values = [ac.evaluate(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
         values += op_values 
         values = torch.cat(tuple(values), dim = 1)

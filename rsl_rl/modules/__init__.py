@@ -28,7 +28,7 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
-from .actor_critic import ActorCritic, Actor, Critic
+from .actor_critic import ActorCritic#, Actor, Critic
 from .actor_critic_recurrent import ActorCriticRecurrent
-from .actor_critic_attention import ActorCriticAttention, ActorAttention, CriticAttention
+from .actor_critic_attention import ActorCriticAttention#, ActorAttention, CriticAttention
 from .multi_agent_actor_critic import MAActorCritic, CMAActorCritic

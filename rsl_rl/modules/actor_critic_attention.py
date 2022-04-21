@@ -38,6 +38,13 @@ from torch.nn.modules import rnn
 from rsl_rl.modules.attention.encoders import EncoderAttention1, EncoderAttention2
 
 
+class StructuredActorCriticAttention(nn.Module):
+    def __init__(self,):
+        #put code
+        pass
+
+
+
 class ActorCriticAttention(nn.Module):
     is_recurrent = False
     def __init__(self,  num_ego_obs,
