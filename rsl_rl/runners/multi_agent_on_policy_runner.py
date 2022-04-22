@@ -62,6 +62,8 @@ class MAOnPolicyRunner:
         actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCritic
         if self.cfg["algorithm_class_name"] == 'JRMAPPO' and self.cfg["policy_class_name"] != 'CMAActorCritic':
             raise NotImplementedError
+        elif self.cfg["algorithm_class_name"] == 'IMAPPO' and self.cfg["policy_class_name"] != 'MAActorCritic':
+            raise ValueError("Please use MAActorCritic in combination with Independent Multi Agent PPO")
 
         actor_critic = actor_critic_class( self.env.num_obs,
                                                         num_critic_obs,
@@ -120,7 +122,7 @@ class MAOnPolicyRunner:
                         # Book keeping
                         if 'episode' in infos:
                             ep_infos.append(infos['episode'])
-                        cur_reward_sum += rewards[:, 0]
+                        cur_reward_sum += torch.sum(rewards[:, 0, :], dim = 1)
                         cur_episode_length += 1
                         new_ids = (dones > 0).nonzero(as_tuple=False)
                         rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())

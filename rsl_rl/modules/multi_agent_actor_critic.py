@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from torch.distributions import Normal
 import copy
-from rsl_rl.modules import ActorCritic, ActorCriticAttention, Actor, Critic, ActorAttention, CriticAttention
+from rsl_rl.modules import ActorCritic, ActorCriticAttention#, ActorAttention, CriticAttention
 import trueskill
 
 class MAActorCritic():

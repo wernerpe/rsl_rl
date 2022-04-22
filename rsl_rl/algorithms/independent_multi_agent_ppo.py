@@ -79,7 +79,7 @@ class IMAPPO:
         return all_agent_actions
 
     def process_env_step(self, rewards, dones, infos):
-        self.transition.rewards = rewards.clone()[:, 0]
+        self.transition.rewards = torch.sum(rewards.clone()[:, 0, :], dim = 1)
         self.transition.dones = dones[:, 0]
         if 'agent_active' in infos:
           self.transition.active_agents = 1.0 * infos['agent_active']
