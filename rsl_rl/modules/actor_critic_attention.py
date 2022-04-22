@@ -38,13 +38,6 @@ from torch.nn.modules import rnn
 from rsl_rl.modules.attention.encoders import EncoderAttention1, EncoderAttention2
 
 
-class StructuredActorCriticAttention(nn.Module):
-    def __init__(self,):
-        #put code
-        pass
-
-
-
 class ActorCriticAttention(nn.Module):
     is_recurrent = False
     def __init__(self,  num_ego_obs,
@@ -53,6 +46,7 @@ class ActorCriticAttention(nn.Module):
                         num_agents,
                         actor_hidden_dims=[256, 256, 256],
                         critic_hidden_dims=[256, 256, 256],
+                        critic_output_dim=1,
                         activation='elu',
                         init_noise_std=1.0,
                         **kwargs):
@@ -94,6 +88,7 @@ class ActorCriticAttention(nn.Module):
         self.critic = CriticAttention(
           input_dim=mlp_input_dim_c, 
           hidden_dims=critic_hidden_dims, 
+          output_dims=critic_output_dim,
           activation=activation,
           encoder=self.encoder,
         )
@@ -183,7 +178,7 @@ class ActorAttention(nn.Module):
 
 class CriticAttention(nn.Module):
   
-    def __init__(self, input_dim, hidden_dims, activation, encoder):
+    def __init__(self, input_dim, hidden_dims, activation, encoder, output_dims=1):
 
         super(CriticAttention, self).__init__()
 
@@ -195,7 +190,7 @@ class CriticAttention(nn.Module):
         critic_layers.append(nn.Tanh())
         for l in range(len(hidden_dims)):
             if l == len(hidden_dims) - 1:
-                critic_layers.append(nn.Linear(hidden_dims[l], 1))
+                critic_layers.append(nn.Linear(hidden_dims[l], output_dims))
             else:
                 critic_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
                 critic_layers.append(activation)

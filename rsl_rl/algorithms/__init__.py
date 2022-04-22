@@ -28,7 +28,7 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
-#from .ppo import PPO
+from .ppo import PPO
 
 #fully independent learning
 from .independent_multi_agent_ppo import IMAPPO

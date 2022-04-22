@@ -30,7 +30,7 @@ class MAActorCritic():
         self.is_attentive = kwargs['attentive']
         self.num_teams = kwargs['numteams']
         self.team_size = kwargs['teamsize']
-        self.teams = [torch.tensor([idx for idx in range(self.team_size*start, self.team_size*start+self.team_size)], dtype=torch.long, device = self.device) for start in range(self.num_teams)]
+        self.teams = [torch.tensor([idx for idx in range(self.team_size*start, self.team_size*start+self.team_size)], dtype=torch.long) for start in range(self.num_teams)]
 
         if self.is_attentive:
             self.ac1 = ActorCriticAttention(num_ego_obs=35,
@@ -231,7 +231,7 @@ class MultiTeamCMAAC():
         self.team_size = kwargs['teamsize']
         
         self.is_recurrent = False
-        self.teams = [torch.tensor([idx for idx in range(self.team_size*start, self.team_size*start+self.team_size)], dtype=torch.long, device = self.device) for start in range(self.num_teams)]
+        self.teams = [torch.tensor([idx for idx in range(self.team_size*start, self.team_size*start+self.team_size)], dtype=torch.long) for start in range(self.num_teams)]
         self.teamacs = [CMAActorCritic(num_actor_obs,
                                        num_critic_obs,
                                        num_actions,
@@ -405,14 +405,7 @@ class CMAActorCritic(nn.Module):
                                         init_noise_std=init_noise_std, 
                                         **kwargs)
         else:
-            self.ac = ActorCritic( num_actor_obs,
-                                 num_critic_obs,
-                                 num_actions,
-                                 actor_hidden_dims,
-                                 critic_hidden_dims,
-                                 activation,
-                                 init_noise_std, 
-                                 **kwargs)
+            raise NotImplementedError
 
             
 #        if kwargs:

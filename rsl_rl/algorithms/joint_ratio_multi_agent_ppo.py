@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from rsl_rl.modules import CMAActorCritic
+from rsl_rl.modules import CMAActorCritic, MultiTeamCMAAC
 from rsl_rl.storage import CentralizedMultiAgentRolloutStorage
 
 #only track transitions of agent 1, agent 2 blindly runs old version of policy 
@@ -11,7 +11,7 @@ from rsl_rl.storage import CentralizedMultiAgentRolloutStorage
 #generator of multi agent rollout storage only returns data on agent 1
 
 class JRMAPPO:
-    actor_critic: CMAActorCritic
+    actor_critic: MultiTeamCMAAC  # CMAActorCritic
     def __init__(self,
                  actor_critic,
                  num_learning_epochs=1,

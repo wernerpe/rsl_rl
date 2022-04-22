@@ -124,7 +124,7 @@ class MAOnPolicyRunner:
                         if 'episode' in infos:
                             ep_infos.append(infos['episode'])
                         cur_reward_sum += torch.sum(rewards[:, 0, :], dim = 1)
-                        cur_team_reward_sum += torch.sum(torch.sum(rewards[:, self.alg.actor_critic.teams, :], dim = 2), dim = 1)
+                        cur_team_reward_sum += torch.sum(torch.sum(rewards[:, self.alg.actor_critic.teams[0], :], dim = 2), dim = 1)
                         cur_episode_length += 1
                         new_ids = (dones > 0).nonzero(as_tuple=False)
                         rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
