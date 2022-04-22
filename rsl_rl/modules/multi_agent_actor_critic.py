@@ -28,6 +28,9 @@ class MAActorCritic():
         self.init_noise_std = init_noise_std
         self.kwargs = kwargs
         self.is_attentive = kwargs['attentive']
+        self.num_teams = kwargs['numteams']
+        self.team_size = kwargs['teamsize']
+        self.teams = [torch.tensor([idx for idx in range(self.team_size*start, self.team_size*start+self.team_size)], dtype=torch.long, device = self.device) for start in range(self.num_teams)]
 
         if self.is_attentive:
             self.ac1 = ActorCriticAttention(num_ego_obs=35,

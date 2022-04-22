@@ -42,7 +42,6 @@ from rsl_rl.env import VecEnv
 
 
 class MAOnPolicyRunner:
-
     def __init__(self,
                  env: VecEnv,
                  train_cfg,
@@ -61,7 +60,7 @@ class MAOnPolicyRunner:
             num_critic_obs = self.env.num_obs
         actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCritic
         if self.cfg["algorithm_class_name"] == 'JRMAPPO' and self.cfg["policy_class_name"] != 'CMAActorCritic':
-            raise NotImplementedError
+            raise ValueError("Please use CMAActorCritic in combination with Joint-Ratio Multi Agent PPO")
         elif self.cfg["algorithm_class_name"] == 'IMAPPO' and self.cfg["policy_class_name"] != 'MAActorCritic':
             raise ValueError("Please use MAActorCritic in combination with Independent Multi Agent PPO")
 
@@ -102,8 +101,10 @@ class MAOnPolicyRunner:
 
         ep_infos = []
         rewbuffer = deque(maxlen=100)
+        trewbuffer = deque(maxlen=100)
         lenbuffer = deque(maxlen=100)
         cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_team_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
@@ -123,9 +124,11 @@ class MAOnPolicyRunner:
                         if 'episode' in infos:
                             ep_infos.append(infos['episode'])
                         cur_reward_sum += torch.sum(rewards[:, 0, :], dim = 1)
+                        cur_team_reward_sum += torch.sum(torch.sum(rewards[:, self.alg.actor_critic.teams, :], dim = 2), dim = 1)
                         cur_episode_length += 1
                         new_ids = (dones > 0).nonzero(as_tuple=False)
                         rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                        trewbuffer.extend(cur_team_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
                         lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
                         cur_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
@@ -189,6 +192,13 @@ class MAOnPolicyRunner:
             self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
             self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
+
+        if len(locs['trewbuffer']) > 0:
+            self.writer.add_scalar('Train/mean_team_reward', statistics.mean(locs['trewbuffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_team_reward/time', statistics.mean(locs['trewbuffer']), self.tot_time)
+            self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
+
 
         str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
 
@@ -254,7 +264,6 @@ class MAOnPolicyRunner:
             opt_dicts.append(dict['optimizer_state_dict'])
         self.alg.actor_critic.load_multi_state_dict(model_dicts)
         if load_optimizer:
-            #raise NotImplementedError
             self.alg.optimizer.load_state_dict(opt_dicts[0])
         self.current_learning_iteration = dicts[0]['iter']
 

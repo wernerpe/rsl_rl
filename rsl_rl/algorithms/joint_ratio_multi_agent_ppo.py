@@ -68,15 +68,15 @@ class JRMAPPO:
         
         # Compute the actions and values
         all_agent_actions =  self.actor_critic.act(obs).detach()
-        self.transition.actions = all_agent_actions
-        self.transition.values = self.actor_critic.evaluate(critic_obs).detach()
+        self.transition.actions = all_agent_actions[:, self.actor_critic.teams[0], :]
+        self.transition.values = self.actor_critic.evaluate(critic_obs[:, self.actor_critic.teams[0], :]).detach()
         #only record log prob of actions from net to train
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()
         self.transition.action_sigma = self.actor_critic.action_std.detach()
         # need to record obs and critic_obs before env.step()
-        self.transition.observations = obs
-        self.transition.critic_observations = critic_obs
+        self.transition.observations = obs[:, self.actor_critic.teams[0], :]
+        self.transition.critic_observations = critic_obs[:, self.actor_critic.teams[0], :]
         return all_agent_actions
 
     def process_env_step(self, rewards, dones, infos):
@@ -86,7 +86,7 @@ class JRMAPPO:
           self.transition.active_agents = 1.0 * infos['agent_active']
         # Bootstrapping on time outs
         if 'time_outs' in infos:
-            self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
+            self.transition.rewards += self.gamma * self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device)
 
         # Record the transition
         self.storage.add_transitions(self.transition)
@@ -108,7 +108,6 @@ class JRMAPPO:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch, active_agents in generator:
-
 
                 self.actor_critic.act_ac_train(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0], active_agents=active_agents)
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
