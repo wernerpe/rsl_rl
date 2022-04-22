@@ -37,7 +37,7 @@ from torch.utils.tensorboard import SummaryWriter
 import torch
 
 from rsl_rl.algorithms import PPO, IMAPPO, JRMAPPO
-from rsl_rl.modules import MAActorCritic, CMAActorCritic
+from rsl_rl.modules import MAActorCritic, CMAActorCritic, MultiTeamCMAAC
 from rsl_rl.env import VecEnv
 
 
@@ -59,8 +59,8 @@ class MAOnPolicyRunner:
         else:
             num_critic_obs = self.env.num_obs
         actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCritic
-        if self.cfg["algorithm_class_name"] == 'JRMAPPO' and self.cfg["policy_class_name"] != 'CMAActorCritic':
-            raise ValueError("Please use CMAActorCritic in combination with Joint-Ratio Multi Agent PPO")
+        if self.cfg["algorithm_class_name"] == 'JRMAPPO' and self.cfg["policy_class_name"] != 'MultiTeamCMAAC':
+            raise ValueError("Please use MultiTeamCMAAC in combination with Joint-Ratio Multi Agent PPO")
         elif self.cfg["algorithm_class_name"] == 'IMAPPO' and self.cfg["policy_class_name"] != 'MAActorCritic':
             raise ValueError("Please use MAActorCritic in combination with Independent Multi Agent PPO")
 

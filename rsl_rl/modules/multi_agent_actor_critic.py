@@ -238,6 +238,7 @@ class MultiTeamCMAAC():
                                        num_agents, 
                                        actor_hidden_dims=[256, 256, 256],
                                        critic_hidden_dims=[256, 256, 256],
+                                       critic_output_shape=2,
                                        activation='elu',
                                        init_noise_std=1.0,
                                        **kwargs) for _ in range(self.num_teams)]
@@ -281,7 +282,7 @@ class MultiTeamCMAAC():
             ac.eval()
 
     def train(self):
-       self.teamacs.train()
+       [teamac.train() for teamac in self.teamacs]
        return None
     
     def to(self, device):
@@ -375,6 +376,7 @@ class CMAActorCritic(nn.Module):
                         num_agents,
                         actor_hidden_dims=[256, 256, 256],
                         critic_hidden_dims=[256, 256, 256],
+                        critic_output_dim=1,
                         activation='elu',
                         init_noise_std=1.0,
                         **kwargs):
@@ -401,6 +403,7 @@ class CMAActorCritic(nn.Module):
                                         num_agents=num_agents,
                                         actor_hidden_dims=actor_hidden_dims,
                                         critic_hidden_dims=critic_hidden_dims,
+                                        critic_output_dim=critic_output_dim,
                                         activation=activation,
                                         init_noise_std=init_noise_std, 
                                         **kwargs)
@@ -423,7 +426,7 @@ class CMAActorCritic(nn.Module):
         self.draw_probs_unnorm[0:-3] = 0.4/(self.max_num_models-3)
         self.draw_probs_unnorm[-3:] = 0.6/3
 
-        self.past_models = [[self.actor.state_dict(), self.critic.state_dict()]]
+        self.past_models = [[self.ac.actor.state_dict(), self.ac.critic.state_dict()]]
         #self.past_ratings_mu = [0]
         #self.past_ratings_sigma = [self.agentratings[0][0].sigma]
 
@@ -471,7 +474,7 @@ class CMAActorCritic(nn.Module):
         return self
 
     def act(self, observations, **kwargs):
-        actions = torch.cat(tuple([self.ac.actor.act(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
+        actions = torch.cat(tuple([self.ac.act(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
         return actions
     
     def act_inference(self, observations, **kwargs):
