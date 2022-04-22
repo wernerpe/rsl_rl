@@ -106,7 +106,7 @@ class JRMAPPO:
           generator = self.storage.attention_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        for obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
+        for obs_batch, critic_obs_batch, actions_batch, target_values_team_batch, target_values_individual_batch, advantages_batch, returns_team_batch, returns_individual_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch, active_agents in generator:
 
                 self.actor_critic.act_ac_train(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0], active_agents=active_agents)
@@ -132,7 +132,7 @@ class JRMAPPO:
                             param_group['lr'] = self.learning_rate
 
 
-                # Surrogate loss
+                # Surrogate loss, using the joint probability ratios of all team members
                 ratio = torch.exp(torch.sum(actions_log_prob_batch, dim = 1) - torch.squeeze(torch.sum(old_actions_log_prob_batch, dim = 1)))
                 surrogate = -torch.squeeze(advantages_batch) * ratio
                 surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(ratio, 1.0 - self.clip_param,
@@ -141,15 +141,25 @@ class JRMAPPO:
 
                 # Value function loss
                 if self.use_clipped_value_loss:
-                    value_clipped = target_values_batch + (value_batch - target_values_batch).clamp(-self.clip_param,
+                    value_team_clipped = target_values_team_batch + (value_batch[:,:,1] - target_values_team_batch).clamp(-self.clip_param,
                                                                                                     self.clip_param)
-                    value_losses = (value_batch - returns_batch).pow(2)
-                    value_losses_clipped = (value_clipped - returns_batch).pow(2)
-                    value_loss = torch.max(value_losses, value_losses_clipped).mean()
-                else:
-                    value_loss = (returns_batch - value_batch).pow(2).mean()
+                    value_losses_team = (torch.sum(value_batch[:,:,1] - returns_team_batch, dim =1)).pow(2)
+                    value_losses_team_clipped = (torch.sum(value_team_clipped - returns_team_batch, dim=1)).pow(2)
+                    value_loss_team = torch.max(value_losses_team, value_losses_team_clipped).mean()
+                    
+                    value_individual_clipped = target_values_individual_batch + (value_batch[:,:,0] - target_values_individual_batch).clamp(-self.clip_param,
+                                                                                                    self.clip_param)
+                    value_losses_individual = (value_batch[:,:,0] - returns_individual_batch).pow(2)
+                    value_losses_individual_clipped = (value_individual_clipped - returns_individual_batch).pow(2)
+                    value_loss_individual = torch.max(value_losses_individual, value_losses_individual_clipped).mean()
+                   
+                    raise ValueError('check the value output index such that team and individual are correctly assigned')
 
-                loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
+                else: 
+                    value_loss_team = (torch.sum(returns_team_batch - value_batch[:,:,1], dim = 1)).pow(2).mean()
+                    value_loss_individual = (returns_individual_batch - value_batch[:,:,0]).pow(2).mean()
+
+                loss = surrogate_loss + self.value_loss_coef * (value_loss_team + value_loss_individual)  - self.entropy_coef * entropy_batch.mean()
 
                 # Gradient step
                 self.optimizer.zero_grad()
