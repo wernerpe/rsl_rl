@@ -251,11 +251,11 @@ class MultiTeamCMAAC():
 
     @property
     def action_mean(self):
-        return self.teamacs[0].distribution.mean
+        return self.teamacs[0].action_mean
 
     @property
     def action_std(self):
-        return self.teamacs[0].distribution.stddev
+        return self.teamacs[0].action_std
     
     @property
     def std(self):
@@ -305,7 +305,7 @@ class MultiTeamCMAAC():
         return actions
     
     def get_actions_log_prob(self, actions):
-        return self.teamacs[0].distribution.log_prob(actions).sum(dim=-1)
+        return self.teamacs[0].get_actions_log_prob(actions).sum(dim=-1)
     
     def evaluate_inference(self, observations, **kwargs):
         values = [ac.evaluate(observations[:, self.teams[idx],:]) for idx, ac in self.teamacs]
@@ -313,7 +313,7 @@ class MultiTeamCMAAC():
         return values
     
     def evaluate(self, critic_observations, **kwargs):
-        value = self.teamacs[0].critic(critic_observations)
+        value = self.teamacs[0].evaluate(critic_observations[:, self.teams[0], :])
         return value
 
     def update_ac_ratings(self, infos):
@@ -438,11 +438,11 @@ class CMAActorCritic(nn.Module):
     
     @property
     def action_mean(self):
-        return self.ac.actor.distribution.mean
+        return self.ac.distribution.mean
 
     @property
     def action_std(self):
-        return self.ac.actor.distribution.stddev
+        return self.ac.distribution.stddev
     
     @property
     def std(self):
@@ -474,17 +474,18 @@ class CMAActorCritic(nn.Module):
         return self
 
     def act(self, observations, **kwargs):
-        actions = torch.cat(tuple([self.ac.act(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
+        actions = torch.stack(tuple([self.ac.act(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
         return actions
     
     def act_inference(self, observations, **kwargs):
-        actions = torch.cat(tuple([self.ac.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
+        actions = torch.stack(tuple([self.ac.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
         return actions
     
     def get_actions_log_prob(self, actions):
-        actions = torch.cat(tuple([self.ac.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
-        return self.ac.actor.distribution.log_prob(actions).sum(dim=-1)
-    
+        # actions = torch.stack(tuple([self.ac.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
+        # return self.ac.actor.distribution.log_prob(actions).sum(dim=-1)
+        return torch.stack([self.ac.get_actions_log_prob(actions[:, idx, :]) for idx in range(self.team_size)], dim=1)
+
     def evaluate_inference(self, observations, **kwargs):
         values = []
         values = [self.ac.evaluate(observations[:, 0,:])]
@@ -494,7 +495,7 @@ class CMAActorCritic(nn.Module):
         return values
     
     def evaluate(self, critic_observations, **kwargs):
-        value = self.ac1.critic(critic_observations)
+        value = self.ac.evaluate(critic_observations)
         return value
 
     def update_ac_ratings(self, infos):
