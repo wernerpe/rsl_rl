@@ -144,7 +144,7 @@ class CentralizedMultiAgentRolloutStorage:
             self.returns[step] = advantage + self.values[step]
 
         # Compute and normalize the advantages
-        self.advantages = torch.sum(self.returns - self.values, dim = (1,2))
+        self.advantages = torch.sum(self.returns - self.values, dim = (-2,-1))
         self.advantages = (self.advantages - self.advantages.mean()) / (self.advantages.std() + 1e-8)
 
     def get_statistics(self):
@@ -280,11 +280,15 @@ class CentralizedMultiAgentRolloutStorage:
                 critic_observations_batch = critic_observations[batch_idx]
                 actions_batch = actions[batch_idx]
                 target_values_batch = values[batch_idx]
+                target_values_individual_batch = target_values_batch[..., 0]
+                target_values_team_batch = target_values_batch[..., 1]
                 returns_batch = returns[batch_idx]
+                returns_individual_batch = returns_batch[..., 0]
+                returns_team_batch = returns_batch[..., 1] 
                 old_actions_log_prob_batch = old_actions_log_prob[batch_idx]
                 advantages_batch = advantages[batch_idx]
                 old_mu_batch = old_mu[batch_idx]
                 old_sigma_batch = old_sigma[batch_idx]
-                active_agents_batch = active_agents[batch_idx]
-                yield obs_batch, critic_observations_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, \
-                       old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (None, None), None, active_agents_batch
+                #active_agents_batch = active_agents[batch_idx]
+                yield obs_batch, critic_observations_batch, actions_batch, target_values_individual_batch, target_values_team_batch, advantages_batch, returns_individual_batch, returns_team_batch, \
+                       old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (None, None), None, None

@@ -94,7 +94,7 @@ class JRMAPPO:
         self.actor_critic.reset(dones)
     
     def compute_returns(self, last_critic_obs):
-        last_values = self.actor_critic.evaluate(last_critic_obs).detach()
+        last_values = self.actor_critic.evaluate(last_critic_obs[:, self.actor_critic.teams[0], :]).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
     def update(self):
@@ -106,15 +106,15 @@ class JRMAPPO:
           generator = self.storage.attention_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        for obs_batch, critic_obs_batch, actions_batch, target_values_team_batch, target_values_individual_batch, advantages_batch, returns_team_batch, returns_individual_batch, old_actions_log_prob_batch, \
+        for obs_batch, critic_obs_batch, actions_batch, target_values_individual_batch, target_values_team_batch, advantages_batch, returns_individual_batch, returns_team_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch, active_agents in generator:
 
                 self.actor_critic.act_ac_train(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0], active_agents=active_agents)
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
                 value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
-                mu_batch = self.actor_critic.action_mean
-                sigma_batch = self.actor_critic.action_std
-                entropy_batch = self.actor_critic.entropy
+                mu_batch = self.actor_critic.action_mean.flatten(0,1)
+                sigma_batch = self.actor_critic.action_std.flatten(0,1)
+                entropy_batch = self.actor_critic.entropy.flatten(0,1)
 
                 # KL
                 if self.desired_kl != None and self.schedule == 'adaptive':

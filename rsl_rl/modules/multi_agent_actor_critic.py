@@ -263,7 +263,7 @@ class MultiTeamCMAAC():
 
     @property
     def entropy(self):
-        return self.teamacs[0].distribution.entropy().sum(dim=-1)
+        return self.teamacs[0].entropy
     
     @property
     def parameters(self):
@@ -313,7 +313,7 @@ class MultiTeamCMAAC():
         return values
     
     def evaluate(self, critic_observations, **kwargs):
-        value = self.teamacs[0].evaluate(critic_observations[:, self.teams[0], :])
+        value = self.teamacs[0].evaluate(critic_observations)
         return value
 
     def update_ac_ratings(self, infos):
@@ -397,6 +397,7 @@ class CMAActorCritic(nn.Module):
         self.team_size = kwargs['teamsize']
         self.action_means = []
         self.action_stds = []
+        self.action_entropies = []
 
         if self.is_attentive:
             self.ac = ActorCriticAttention(num_ego_obs=35,
@@ -452,7 +453,7 @@ class CMAActorCritic(nn.Module):
 
     @property
     def entropy(self):
-        return self.ac.actor.distribution.entropy().sum(dim=-1)
+        return torch.stack(tuple(self.action_entropies), dim = 1)
     
     #not sure how to fix these
     #@property
@@ -479,10 +480,13 @@ class CMAActorCritic(nn.Module):
         actions = []
         self.action_means = []
         self.action_stds = []
+        self.action_entropies = []
         for idx in range(self.team_size):
             actions.append(self.ac.act(observations[:, idx, :]))
             self.action_means.append(self.ac.action_mean)
             self.action_stds.append(self.ac.action_std)
+            self.action_entropies.append(self.ac.entropy)
+            
         actions = torch.stack(tuple(actions), dim = 1)
         return actions
     
