@@ -116,11 +116,12 @@ class JRMAPPO:
                 sigma_batch = self.actor_critic.action_std.flatten(0,1)
                 entropy_batch = self.actor_critic.entropy.flatten(0,1)
 
+
                 # KL
                 if self.desired_kl != None and self.schedule == 'adaptive':
                     with torch.inference_mode():
                         kl = torch.sum(
-                            torch.log(sigma_batch / old_sigma_batch + 1.e-5) + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch)) / (2.0 * torch.square(sigma_batch)) - 0.5, axis=-1)
+                            torch.log(sigma_batch / old_sigma_batch.flatten(0, 1) + 1.e-5) + (torch.square(old_sigma_batch.flatten(0, 1)) + torch.square(old_mu_batch.flatten(0, 1) - mu_batch)) / (2.0 * torch.square(sigma_batch)) - 0.5, axis=-1)
                         kl_mean = torch.mean(kl)
 
                         if kl_mean > self.desired_kl * 2.0:
@@ -133,7 +134,7 @@ class JRMAPPO:
 
 
                 # Surrogate loss, using the joint probability ratios of all team members
-                ratio = torch.exp(torch.sum(actions_log_prob_batch, dim = 1) - torch.squeeze(torch.sum(old_actions_log_prob_batch, dim = 1)))
+                ratio = torch.squeeze(torch.exp(torch.sum(actions_log_prob_batch, dim = 1) - torch.sum(old_actions_log_prob_batch, dim = 1)))
                 surrogate = -torch.squeeze(advantages_batch) * ratio
                 surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(ratio, 1.0 - self.clip_param,
                                                                                 1.0 + self.clip_param)
@@ -141,23 +142,23 @@ class JRMAPPO:
 
                 # Value function loss
                 if self.use_clipped_value_loss:
-                    value_team_clipped = target_values_team_batch + (value_batch[:,:,1] - target_values_team_batch).clamp(-self.clip_param,
-                                                                                                    self.clip_param)
-                    value_losses_team = (torch.sum(value_batch[:,:,1] - returns_team_batch, dim =1)).pow(2)
-                    value_losses_team_clipped = (torch.sum(value_team_clipped - returns_team_batch, dim=1)).pow(2)
-                    value_loss_team = torch.max(value_losses_team, value_losses_team_clipped).mean()
-                    
                     value_individual_clipped = target_values_individual_batch + (value_batch[:,:,0] - target_values_individual_batch).clamp(-self.clip_param,
                                                                                                     self.clip_param)
                     value_losses_individual = (value_batch[:,:,0] - returns_individual_batch).pow(2)
                     value_losses_individual_clipped = (value_individual_clipped - returns_individual_batch).pow(2)
                     value_loss_individual = torch.max(value_losses_individual, value_losses_individual_clipped).mean()
                    
-                    raise ValueError('check the value output index such that team and individual are correctly assigned')
+                    value_team_clipped = target_values_team_batch + (value_batch[:,:,1] - target_values_team_batch).clamp(-self.clip_param,
+                                                                                                    self.clip_param)
+                    value_losses_team = (torch.sum(value_batch[:,:,1] - returns_team_batch, dim =1)).pow(2)
+                    value_losses_team_clipped = (torch.sum(value_team_clipped - returns_team_batch, dim=1)).pow(2)
+                    value_loss_team = torch.max(value_losses_team, value_losses_team_clipped).mean()
+                    
+#                  raise ValueError('check the value output index such that team and individual are correctly assigned')
 
                 else: 
-                    value_loss_team = (torch.sum(returns_team_batch - value_batch[:,:,1], dim = 1)).pow(2).mean()
                     value_loss_individual = (returns_individual_batch - value_batch[:,:,0]).pow(2).mean()
+                    value_loss_team = (torch.sum(returns_team_batch - value_batch[:,:,1], dim = 1)).pow(2).mean()
 
                 loss = surrogate_loss + self.value_loss_coef * (value_loss_team + value_loss_individual)  - self.entropy_coef * entropy_batch.mean()
 

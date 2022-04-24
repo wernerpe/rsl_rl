@@ -206,7 +206,7 @@ class MAActorCritic():
 
 #Class coordinating multiple teams consisting of multiple policies with centralized critics
 
-class MultiTeamCMAAC():
+class MultiTeamCMAAC(nn.Module):
     def __init__(self,  num_actor_obs,
                         num_critic_obs,
                         num_agents,
@@ -216,7 +216,8 @@ class MultiTeamCMAAC():
                         activation='elu',
                         init_noise_std=1.0,
                         **kwargs):
-
+                        
+        super(MultiTeamCMAAC, self).__init__()
         self.num_actor_obs = num_actor_obs
         self.num_critic_obs = num_critic_obs
         self.num_agents = num_agents
@@ -449,7 +450,7 @@ class CMAActorCritic(nn.Module):
     
     @property
     def std(self):
-        return self.ac.actor.std
+        return torch.mean(self.action_std, dim = 1)
 
     @property
     def entropy(self):

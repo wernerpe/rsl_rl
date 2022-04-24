@@ -186,7 +186,7 @@ class MAOnPolicyRunner:
         self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
         self.writer.add_scalar('Perf/collection time', locs['collection_time'], locs['it'])
         self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
-        self.writer.add_scalar('Agent/Trueskill', self.alg.actor_critic.agentratings[0][0].mu, locs['it'])
+        #self.writer.add_scalar('Agent/Trueskill', self.alg.actor_critic.agentratings[0][0].mu, locs['it'])
         
         if len(locs['rewbuffer']) > 0:
             self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
@@ -212,8 +212,9 @@ class MAOnPolicyRunner:
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
                           f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
-                          f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n"""
-                          f"""{'Current Trueskill Agent:':>{pad}} {self.alg.actor_critic.agentratings[0][0].mu:.2f}\n""")
+                          f"""{'Mean team reward:':>{pad}} {statistics.mean(locs['trewbuffer']):.2f}\n"""
+                          f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
+                        #  f"""{'Current Trueskill Agent:':>{pad}} {self.alg.actor_critic.agentratings[0][0].mu:.2f}\n""")
                         
                         #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
                         #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
@@ -238,9 +239,9 @@ class MAOnPolicyRunner:
         print(log_string)
 
     def save(self, path, infos=None):
-        infos = {'trueskill': {'mu':self.alg.actor_critic.agentratings[0][0].mu, 'sigma':self.alg.actor_critic.agentratings[0][0].sigma}}
+        infos ={}# {'trueskill': {'mu':self.alg.actor_critic.agentratings[0][0].mu, 'sigma':self.alg.actor_critic.agentratings[0][0].sigma}}
         torch.save({
-            'model_state_dict': self.alg.actor_critic.ac1.state_dict(),
+            'model_state_dict': self.alg.actor_critic.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
             'iter': self.current_learning_iteration,
             'infos': infos,
