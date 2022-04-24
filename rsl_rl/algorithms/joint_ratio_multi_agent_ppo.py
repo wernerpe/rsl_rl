@@ -86,7 +86,7 @@ class JRMAPPO:
           self.transition.active_agents = 1.0 * infos['agent_active']
         # Bootstrapping on time outs
         if 'time_outs' in infos:
-            self.transition.rewards += self.gamma * self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device)
+            self.transition.rewards += self.gamma * self.transition.values * infos['time_outs'].unsqueeze(1).unsqueeze(1).to(self.device)
 
         # Record the transition
         self.storage.add_transitions(self.transition)
