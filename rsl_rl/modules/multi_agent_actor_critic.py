@@ -244,6 +244,13 @@ class MultiTeamCMAAC(nn.Module):
                                        init_noise_std=1.0,
                                        **kwargs) for _ in range(self.num_teams)]
 
+        self.max_num_models = 40
+        self.draw_probs_unnorm = np.ones((self.max_num_models,))
+        self.draw_probs_unnorm[0:-3] = 0.4/(self.max_num_models-3)
+        self.draw_probs_unnorm[-3:] = 0.6/3
+
+        self.past_models = [self.teamacs[0].ac.state_dict()]
+
     def reset(self, dones=None):
         pass
 
@@ -330,35 +337,38 @@ class MultiTeamCMAAC(nn.Module):
         #         self.agentratings[it] = (trueskill.Rating(mu, sigma),)
 
     def redraw_ac_networks(self):
-        pass
-        # #update population of competing agents, here simply load 
-        # #old version of agent 1 into ac2 slot
-        # self.past_models.append(self.ac1.state_dict())
+
+        teamac1 = self.teamacs[0]
+
+        #update population of competing agents, here simply load 
+        #old version of agent 1 into ac2 slot
+        self.past_models.append(teamac1.ac.state_dict())
         # self.past_ratings_mu.append(self.agentratings[0][0].mu)
         # self.past_ratings_sigma.append(self.agentratings[0][0].sigma)
-        # if len(self.past_models)> self.max_num_models:
-        #     idx_del = np.random.randint(0, self.max_num_models-2)
-        #     del self.past_models[idx_del]
-        #     del self.past_ratings_mu[idx_del]
-        #     del self.past_ratings_sigma[idx_del]
+        if len(self.past_models) > self.max_num_models:
+            idx_del = np.random.randint(0, self.max_num_models-2)
+            del self.past_models[idx_del]
+            # del self.past_ratings_mu[idx_del]
+            # del self.past_ratings_sigma[idx_del]
 
-        # #select model to load
-        # #renormalize dist
-        # if len(self.past_models) !=self.max_num_models:
-        #     prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):]) * self.draw_probs_unnorm[-len(self.past_models):]
-        # else:
-        #     prob = self.draw_probs_unnorm
+        #select model to load
+        #renormalize dist
+        if len(self.past_models) !=self.max_num_models:
+            prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):]) * self.draw_probs_unnorm[-len(self.past_models):]
+        else:
+            prob = self.draw_probs_unnorm
 
-        # idx = np.random.choice(len(self.past_models), self.num_agents-1, p = prob)
-        # for op_id, past_model_id in enumerate(idx):
+        idx = np.random.choice(len(self.past_models), self.num_teams-1, p = prob)
+        for agent_id, past_model_id in enumerate(idx):
+            op_id = agent_id + 1
 
-        #     state_dict = self.past_models[past_model_id]
-        #     mu = self.past_ratings_mu[past_model_id]
-        #     sigma = self.past_ratings_sigma[past_model_id]
-        #     self.opponent_acs[op_id].load_state_dict(state_dict)
-        #     self.opponent_acs[op_id].to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
-        #     rating = (trueskill.Rating(mu = mu, sigma = sigma ),) 
-        #     self.agentratings[op_id+1] = rating
+            state_dict = self.past_models[past_model_id]
+            # mu = self.past_ratings_mu[past_model_id]
+            # sigma = self.past_ratings_sigma[past_model_id]
+            self.teamacs[op_id].ac.load_state_dict(state_dict)
+            self.teamacs[op_id].ac.to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
+            # rating = (trueskill.Rating(mu = mu, sigma = sigma ),) 
+            # self.agentratings[op_id+1] = rating
 
         # rating_train_pol = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = self.agentratings[0][0].sigma),)
         # self.agentratings[0] = rating_train_pol 
@@ -462,7 +472,7 @@ class CMAActorCritic(nn.Module):
     #    return self.acs[0].parameters
     
     #def load_state_dict(self, path):
-    #    self.ac1.load_state_dict(path)
+    #    self.ac.load_state_dict(path)
     #    for ac in self.opponent_acs:
     #        ac.load_state_dict(path)
 
