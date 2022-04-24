@@ -238,7 +238,7 @@ class MultiTeamCMAAC():
                                        num_agents, 
                                        actor_hidden_dims=[256, 256, 256],
                                        critic_hidden_dims=[256, 256, 256],
-                                       critic_output_shape=2,
+                                       critic_output_dim=2,
                                        activation='elu',
                                        init_noise_std=1.0,
                                        **kwargs) for _ in range(self.num_teams)]
@@ -305,7 +305,7 @@ class MultiTeamCMAAC():
         return actions
     
     def get_actions_log_prob(self, actions):
-        return self.teamacs[0].get_actions_log_prob(actions).sum(dim=-1)
+        return self.teamacs[0].get_actions_log_prob(actions).view(-1, self.team_size, 1)#.sum(dim=-1)
     
     def evaluate_inference(self, observations, **kwargs):
         values = [ac.evaluate(observations[:, self.teams[idx],:]) for idx, ac in self.teamacs]
@@ -395,6 +395,8 @@ class CMAActorCritic(nn.Module):
         self.kwargs = kwargs
         self.is_attentive = kwargs['attentive']
         self.team_size = kwargs['teamsize']
+        self.action_means = []
+        self.action_stds = []
 
         if self.is_attentive:
             self.ac = ActorCriticAttention(num_ego_obs=35,
@@ -438,11 +440,11 @@ class CMAActorCritic(nn.Module):
     
     @property
     def action_mean(self):
-        return self.ac.distribution.mean
+        return torch.stack(tuple(self.action_means), dim = 1)#self.ac.distribution.mean
 
     @property
     def action_std(self):
-        return self.ac.distribution.stddev
+        return torch.stack(tuple(self.action_stds), dim = 1)
     
     @property
     def std(self):
@@ -474,7 +476,14 @@ class CMAActorCritic(nn.Module):
         return self
 
     def act(self, observations, **kwargs):
-        actions = torch.stack(tuple([self.ac.act(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
+        actions = []
+        self.action_means = []
+        self.action_stds = []
+        for idx in range(self.team_size):
+            actions.append(self.ac.act(observations[:, idx, :]))
+            self.action_means.append(self.ac.action_mean)
+            self.action_stds.append(self.ac.action_std)
+        actions = torch.stack(tuple(actions), dim = 1)
         return actions
     
     def act_inference(self, observations, **kwargs):

@@ -60,19 +60,19 @@ class CentralizedMultiAgentRolloutStorage:
         self.actions_shape = actions_shape
 
         # Core
-        self.observations = torch.zeros(num_transitions_per_env, num_envs, *obs_shape, device=self.device)
+        self.observations = torch.zeros(num_transitions_per_env, num_envs, num_agents, *obs_shape, device=self.device)
         if privileged_obs_shape[0] is not None:
-            self.privileged_observations = torch.zeros(num_transitions_per_env, num_envs, *privileged_obs_shape, device=self.device)
+            self.privileged_observations = torch.zeros(num_transitions_per_env, num_envs, num_agents, *privileged_obs_shape, device=self.device)
         else:
             self.privileged_observations = None
-        self.rewards = torch.zeros(num_transitions_per_env, num_envs, num_agents, 1, device=self.device)
+        self.rewards = torch.zeros(num_transitions_per_env, num_envs, num_agents, 2, device=self.device)
         self.actions = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, device=self.device)
         self.dones = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device).byte()
 
         # For PPO
         self.actions_log_prob = torch.zeros(num_transitions_per_env, num_envs, num_agents, 1, device=self.device)
-        self.values = torch.zeros(num_transitions_per_env, num_envs, num_agents, 1, device=self.device)
-        self.returns = torch.zeros(num_transitions_per_env, num_envs, num_agents, 1, device=self.device)
+        self.values = torch.zeros(num_transitions_per_env, num_envs, num_agents, 2, device=self.device)
+        self.returns = torch.zeros(num_transitions_per_env, num_envs, num_agents, 2, device=self.device)
         self.advantages = torch.zeros(num_transitions_per_env, num_envs, num_agents, 1, device=self.device)
         self.mu = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, device=self.device)
         self.sigma = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, device=self.device)
@@ -102,7 +102,7 @@ class CentralizedMultiAgentRolloutStorage:
         self.mu[self.step].copy_(transition.action_mean)
         self.sigma[self.step].copy_(transition.action_sigma)
         self._save_hidden_states(transition.hidden_states)
-        self._save_active_agents(transition.active_agents)
+        #self._save_active_agents(transition.active_agents)
         self.step += 1
 
     def _save_hidden_states(self, hidden_states):

@@ -80,7 +80,7 @@ class JRMAPPO:
         return all_agent_actions
 
     def process_env_step(self, rewards, dones, infos):
-        self.transition.rewards = rewards.clone()
+        self.transition.rewards = rewards[:, self.actor_critic.teams[0], :].clone()
         self.transition.dones = dones
         if 'agent_active' in infos:
           self.transition.active_agents = 1.0 * infos['agent_active']

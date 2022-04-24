@@ -37,11 +37,12 @@ from torch.utils.tensorboard import SummaryWriter
 import torch
 
 from rsl_rl.algorithms import PPO, IMAPPO, JRMAPPO
-from rsl_rl.modules import MAActorCritic, CMAActorCritic, MultiTeamCMAAC
+from rsl_rl.modules import MAActorCritic, MultiTeamCMAAC
 from rsl_rl.env import VecEnv
 
 
 class MAOnPolicyRunner:
+    actor_critic_class: MultiTeamCMAAC
     def __init__(self,
                  env: VecEnv,
                  train_cfg,
@@ -76,7 +77,7 @@ class MAOnPolicyRunner:
         self.save_interval = self.cfg["save_interval"]
 
         # init storage and model
-        self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions], self.env.num_agents)
+        self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions], actor_critic.team_size)
 
         # Log
         self.log_dir = log_dir
