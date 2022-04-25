@@ -207,8 +207,8 @@ class MAActorCritic():
     def new_rating(self, mu, sigma):
         return (trueskill.Rating(mu = mu, sigma = sigma ),) 
 
-#Class coordinating multiple teams consisting of multiple policies with centralized critics
 
+#Class coordinating multiple teams consisting of multiple policies with centralized critics
 class MultiTeamCMAAC(nn.Module):
     def __init__(self,  num_actor_obs,
                         num_critic_obs,
@@ -252,7 +252,7 @@ class MultiTeamCMAAC(nn.Module):
         self.draw_probs_unnorm[0:-3] = 0.4/(self.max_num_models-3)
         self.draw_probs_unnorm[-3:] = 0.6/3
 
-        self.past_models = [self.teamacs[0].ac.state_dict()]
+        self.past_models = [self.teamacs[0].state_dict()]
 
     def reset(self, dones=None):
         pass
@@ -279,10 +279,14 @@ class MultiTeamCMAAC(nn.Module):
     @property
     def parameters(self):
         return self.teamacs[0].parameters
+
+    # @property
+    def state_dict(self):
+        return self.teamacs[0].state_dict()
     
     def load_state_dict(self, path):
-        for ac in self.teamacs:
-            ac.load_state_dict(path)
+        for teamac in self.teamacs:
+            teamac.load_state_dict(path)
 
     def load_multi_state_dict(self, paths):
         for idx, path in enumerate(paths):
@@ -345,7 +349,7 @@ class MultiTeamCMAAC(nn.Module):
 
         #update population of competing agents, here simply load 
         #old version of agent 1 into ac2 slot
-        self.past_models.append(teamac1.ac.state_dict())
+        self.past_models.append(teamac1.state_dict())
         # self.past_ratings_mu.append(self.agentratings[0][0].mu)
         # self.past_ratings_sigma.append(self.agentratings[0][0].sigma)
         if len(self.past_models) > self.max_num_models:
@@ -368,8 +372,8 @@ class MultiTeamCMAAC(nn.Module):
             state_dict = self.past_models[past_model_id]
             # mu = self.past_ratings_mu[past_model_id]
             # sigma = self.past_ratings_sigma[past_model_id]
-            self.teamacs[op_id].ac.load_state_dict(state_dict)
-            self.teamacs[op_id].ac.to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
+            self.teamacs[op_id].load_state_dict(state_dict)
+            self.teamacs[op_id].to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
             # rating = (trueskill.Rating(mu = mu, sigma = sigma ),) 
             # self.agentratings[op_id+1] = rating
 
@@ -378,8 +382,6 @@ class MultiTeamCMAAC(nn.Module):
         
     def new_rating(self, mu, sigma):
         return (trueskill.Rating(mu = mu, sigma = sigma ),) 
-
-
 
 
 #multi agent actor critic with centralized critic for a single team
@@ -474,10 +476,8 @@ class CMAActorCritic(nn.Module):
     #def parameters(self):
     #    return self.acs[0].parameters
     
-    #def load_state_dict(self, path):
+    # def load_state_dict(self, path):
     #    self.ac.load_state_dict(path)
-    #    for ac in self.opponent_acs:
-    #        ac.load_state_dict(path)
 
     def eval(self):
         self.ac.eval()
@@ -537,40 +537,5 @@ class CMAActorCritic(nn.Module):
         #         sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
         #         self.agentratings[it] = (trueskill.Rating(mu, sigma),)
 
-    def redraw_ac_networks(self):
-        pass
-
-        # #update population of competing agents, here simply load 
-        # #old version of agent 1 into ac2 slot
-        # self.past_models.append(self.ac1.state_dict())
-        # self.past_ratings_mu.append(self.agentratings[0][0].mu)
-        # self.past_ratings_sigma.append(self.agentratings[0][0].sigma)
-        # if len(self.past_models)> self.max_num_models:
-        #     idx_del = np.random.randint(0, self.max_num_models-2)
-        #     del self.past_models[idx_del]
-        #     del self.past_ratings_mu[idx_del]
-        #     del self.past_ratings_sigma[idx_del]
-
-        # #select model to load
-        # #renormalize dist
-        # if len(self.past_models) !=self.max_num_models:
-        #     prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):]) * self.draw_probs_unnorm[-len(self.past_models):]
-        # else:
-        #     prob = self.draw_probs_unnorm
-
-        # idx = np.random.choice(len(self.past_models), self.num_agents-1, p = prob)
-        # for op_id, past_model_id in enumerate(idx):
-
-        #     state_dict = self.past_models[past_model_id]
-        #     mu = self.past_ratings_mu[past_model_id]
-        #     sigma = self.past_ratings_sigma[past_model_id]
-        #     self.opponent_acs[op_id].load_state_dict(state_dict)
-        #     self.opponent_acs[op_id].to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
-        #     rating = (trueskill.Rating(mu = mu, sigma = sigma ),) 
-        #     self.agentratings[op_id+1] = rating
-
-        # rating_train_pol = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = self.agentratings[0][0].sigma),)
-        # self.agentratings[0] = rating_train_pol 
-        
     def new_rating(self, mu, sigma):
         return (trueskill.Rating(mu = mu, sigma = sigma ),) 

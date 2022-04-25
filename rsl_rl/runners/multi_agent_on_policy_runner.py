@@ -273,17 +273,17 @@ class MAOnPolicyRunner:
         #add loaded models to buffers and set current ratings
         infos = []
         self.alg.actor_critic.past_models = model_dicts
-        self.alg.actor_critic.agentratings = []
-        self.alg.actor_critic.past_ratings_mu = []
-        self.alg.actor_critic.past_ratings_sigma = []
+        # self.alg.actor_critic.agentratings = []
+        # self.alg.actor_critic.past_ratings_mu = []
+        # self.alg.actor_critic.past_ratings_sigma = []
         for dict in dicts:
             info = dict['infos']
-            mu = info['trueskill']['mu']
-            sigma = info['trueskill']['sigma']
-            active_rating = self.alg.actor_critic.new_rating(mu, sigma)
-            self.alg.actor_critic.agentratings.append(active_rating)
-            self.alg.actor_critic.past_ratings_mu.append(mu)
-            self.alg.actor_critic.past_ratings_sigma.append(sigma)
+            # mu = info['trueskill']['mu']
+            # sigma = info['trueskill']['sigma']
+            # active_rating = self.alg.actor_critic.new_rating(mu, sigma)
+            # self.alg.actor_critic.agentratings.append(active_rating)
+            # self.alg.actor_critic.past_ratings_mu.append(mu)
+            # self.alg.actor_critic.past_ratings_sigma.append(sigma)
             infos.append(info)
         return infos
     
