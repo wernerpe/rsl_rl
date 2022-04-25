@@ -85,7 +85,7 @@ class MultiAgentRolloutStorage:
         self.saved_hidden_states_c = None
 
         # attention
-        self.active_agents = torch.zeros(num_transitions_per_env, num_envs, num_agents, device=self.device)
+        # self.active_agents = torch.zeros(num_transitions_per_env, num_envs, num_agents, device=self.device)
 
         self.step = 0
 
@@ -102,7 +102,7 @@ class MultiAgentRolloutStorage:
         self.mu[self.step].copy_(transition.action_mean)
         self.sigma[self.step].copy_(transition.action_sigma)
         self._save_hidden_states(transition.hidden_states)
-        self._save_active_agents(transition.active_agents)
+        #self._save_active_agents(transition.active_agents)
         self.step += 1
 
     def _save_hidden_states(self, hidden_states):
@@ -125,7 +125,7 @@ class MultiAgentRolloutStorage:
         if active_agents is None:
             return
 
-        self.active_agents[self.step].copy_(active_agents)
+        #self.active_agents[self.step].copy_(active_agents)
 
 
     def clear(self):
@@ -267,7 +267,7 @@ class MultiAgentRolloutStorage:
         old_mu = self.mu.flatten(0, 1)
         old_sigma = self.sigma.flatten(0, 1)
 
-        active_agents = self.active_agents.flatten(0, 1)
+        #active_agents = self.active_agents.flatten(0, 1)
 
         for epoch in range(num_epochs):
             for i in range(num_mini_batches):
@@ -285,6 +285,6 @@ class MultiAgentRolloutStorage:
                 advantages_batch = advantages[batch_idx]
                 old_mu_batch = old_mu[batch_idx]
                 old_sigma_batch = old_sigma[batch_idx]
-                active_agents_batch = active_agents[batch_idx]
+                #active_agents_batch = active_agents[batch_idx]
                 yield obs_batch, critic_observations_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, \
-                       old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (None, None), None, active_agents_batch
+                       old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (None, None), None, None

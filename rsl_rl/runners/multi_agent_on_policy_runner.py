@@ -104,8 +104,8 @@ class MAOnPolicyRunner:
         rewbuffer = deque(maxlen=100)
         trewbuffer = deque(maxlen=100)
         lenbuffer = deque(maxlen=100)
-        cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
-        cur_team_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_mean_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_mean_team_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
@@ -124,14 +124,15 @@ class MAOnPolicyRunner:
                         # Book keeping
                         if 'episode' in infos:
                             ep_infos.append(infos['episode'])
-                        cur_reward_sum += torch.sum(rewards[:, 0, :], dim = 1)
-                        cur_team_reward_sum += torch.sum(torch.sum(rewards[:, self.alg.actor_critic.teams[0], :], dim = 2), dim = 1)
+                        cur_mean_reward_sum += torch.sum(torch.mean(rewards[:, self.alg.actor_critic.teams[0], :], dim = 1), dim = 1)
+                        cur_mean_team_reward_sum += torch.mean(rewards[:, self.alg.actor_critic.teams[0], 1], dim = 1)
                         cur_episode_length += 1
                         new_ids = (dones > 0).nonzero(as_tuple=False)
-                        rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
-                        trewbuffer.extend(cur_team_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                        rewbuffer.extend(cur_mean_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                        trewbuffer.extend(cur_mean_team_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
                         lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
-                        cur_reward_sum[new_ids] = 0
+                        cur_mean_reward_sum[new_ids] = 0
+                        cur_mean_team_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
 
                     self.alg.actor_critic.update_ac_ratings(infos)
@@ -211,7 +212,7 @@ class MAOnPolicyRunner:
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
-                          f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
+                          f"""{'Mean total reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
                           f"""{'Mean team reward:':>{pad}} {statistics.mean(locs['trewbuffer']):.2f}\n"""
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
                         #  f"""{'Current Trueskill Agent:':>{pad}} {self.alg.actor_critic.agentratings[0][0].mu:.2f}\n""")

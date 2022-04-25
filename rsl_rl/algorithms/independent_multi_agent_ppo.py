@@ -81,8 +81,8 @@ class IMAPPO:
     def process_env_step(self, rewards, dones, infos):
         self.transition.rewards = torch.sum(rewards.clone()[:, 0, :], dim = 1)
         self.transition.dones = dones[:, 0]
-        if 'agent_active' in infos:
-          self.transition.active_agents = 1.0 * infos['agent_active']
+        #if 'agent_active' in infos:
+        #  self.transition.active_agents = 1.0 * infos['agent_active']
         # Bootstrapping on time outs
         if 'time_outs' in infos:
             self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)

@@ -97,6 +97,9 @@ class MAActorCritic():
     def parameters(self):
         return self.ac1.parameters
     
+    def state_dict(self):
+        return self.ac1.state_dict()
+
     def load_state_dict(self, path):
         self.ac1.load_state_dict(path)
         for ac in self.opponent_acs:
@@ -216,7 +219,7 @@ class MultiTeamCMAAC(nn.Module):
                         activation='elu',
                         init_noise_std=1.0,
                         **kwargs):
-                        
+
         super(MultiTeamCMAAC, self).__init__()
         self.num_actor_obs = num_actor_obs
         self.num_critic_obs = num_critic_obs
