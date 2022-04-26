@@ -183,7 +183,7 @@ class MAOnPolicyRunner:
         self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
         self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
         if locs['aux_info_loss']:
-            for key, value in zip(locs['aux_info_loss'].keys(), locs['aux_info_loss'].items()):
+            for key, value in locs['aux_info_loss'].items():
                 self.writer.add_scalar('Loss/'+key, value, locs['it'])
                 
         self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
