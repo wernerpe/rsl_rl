@@ -144,7 +144,7 @@ class MAOnPolicyRunner:
                 start = stop
                 self.alg.compute_returns(critic_obs)
             
-            mean_value_loss, mean_surrogate_loss = self.alg.update()
+            mean_value_loss, mean_surrogate_loss, aux_info_loss = self.alg.update()
             if  it % self.population_update_interval == 0:
                 self.alg.update_population()
             stop = time.time()
@@ -182,6 +182,10 @@ class MAOnPolicyRunner:
 
         self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
         self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
+        if locs['aux_info_loss']:
+            for key, value in zip(locs['aux_info_loss'].keys(), locs['aux_info_loss'].items()):
+                self.writer.add_scalar('Loss/'+key, value, locs['it'])
+                
         self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
         self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
         self.writer.add_scalar('Perf/total_fps', fps, locs['it'])

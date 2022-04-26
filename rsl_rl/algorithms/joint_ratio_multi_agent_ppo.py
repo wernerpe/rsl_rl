@@ -100,6 +100,9 @@ class JRMAPPO:
     def update(self):
         mean_value_loss = 0
         mean_surrogate_loss = 0
+        mean_joint_ratio_values = 0
+        mean_advantage_values = 0
+        
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         elif self.actor_critic.is_attentive:
@@ -170,13 +173,17 @@ class JRMAPPO:
 
                 mean_value_loss += value_loss_team.item() + value_loss_individual.item() 
                 mean_surrogate_loss += surrogate_loss.item()
+                mean_joint_ratio_values += ratio.mean().item()
+                mean_advantage_values += advantages_batch.mean().item()
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
+        mean_joint_ratio_values /= num_updates
+        mean_advantage_values /= num_updates
         self.storage.clear()
 
-        return mean_value_loss, mean_surrogate_loss
+        return mean_value_loss, mean_surrogate_loss, {'mean_joint_ratio_val': mean_joint_ratio_values, 'mean_advantage_val': mean_advantage_values}
 
     def update_population(self,):
         self.actor_critic.redraw_ac_networks()
