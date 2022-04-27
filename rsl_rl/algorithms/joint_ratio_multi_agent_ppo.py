@@ -101,6 +101,8 @@ class JRMAPPO:
         mean_value_loss = 0
         mean_surrogate_loss = 0
         mean_joint_ratio_values = 0
+        mean_jr_den = 0
+        mean_jr_num = 0
         mean_advantage_values = 0
         
         if self.actor_critic.is_recurrent:
@@ -175,15 +177,20 @@ class JRMAPPO:
                 mean_surrogate_loss += surrogate_loss.item()
                 mean_joint_ratio_values += ratio.mean().item()
                 mean_advantage_values += advantages_batch.mean().item()
+                mean_jr_num += torch.sum(actions_log_prob_batch, dim = 1).mean().item()
+                mean_jr_den += torch.sum(old_actions_log_prob_batch, dim = 1).mean().item()
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
         mean_joint_ratio_values /= num_updates
         mean_advantage_values /= num_updates
+        mean_jr_num /= num_updates
+        mean_jr_den /= num_updates
+        
         self.storage.clear()
 
-        return mean_value_loss, mean_surrogate_loss, {'mean_joint_ratio_val': mean_joint_ratio_values, 'mean_advantage_val': mean_advantage_values}
+        return mean_value_loss, mean_surrogate_loss, {'mean_joint_ratio_val': mean_joint_ratio_values, 'mean_advantage_val': mean_advantage_values, 'mean_jr_num': mean_jr_num, 'mean_jr_den': mean_jr_den}
 
     def update_population(self,):
         self.actor_critic.redraw_ac_networks()
