@@ -1,4 +1,5 @@
 
+from lib2to3.pgen2.literals import simple_escapes
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -71,9 +72,11 @@ class JRMAPPO:
         self.transition.actions = all_agent_actions[:, self.actor_critic.teams[0], :]
         self.transition.values = self.actor_critic.evaluate(critic_obs[:, self.actor_critic.teams[0], :]).detach()
         #only record log prob of actions from net to train
-        self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
-        self.transition.action_mean = self.actor_critic.action_mean.detach()
-        self.transition.action_sigma = self.actor_critic.action_std.detach()
+        lp, m, s, e = self.actor_critic.update_distribution_and_get_actions_log_prob_mu_sigma_entropy(obs[:, self.actor_critic.teams[0], :], self.transition.actions)
+        
+        self.transition.actions_log_prob = lp.detach() 
+        self.transition.action_mean = m.detach()
+        self.transition.action_sigma = s.detach()
         # need to record obs and critic_obs before env.step()
         self.transition.observations = obs[:, self.actor_critic.teams[0], :]
         self.transition.critic_observations = critic_obs[:, self.actor_critic.teams[0], :]
@@ -114,13 +117,12 @@ class JRMAPPO:
         for obs_batch, critic_obs_batch, actions_batch, target_values_individual_batch, target_values_team_batch, advantages_batch, returns_individual_batch, returns_team_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch, active_agents in generator:
 
-                self.actor_critic.act_ac_train(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0], active_agents=active_agents)
-                actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
+                #self.actor_critic.act_ac_train(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0], active_agents=active_agents)
+                actions_log_prob_batch, mu_batch, sigma_batch, entropy_batch = self.actor_critic.update_distribution_and_get_actions_log_prob_mu_sigma_entropy(obs_batch, actions_batch)
                 value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
-                mu_batch = self.actor_critic.action_mean.flatten(0,1)
-                sigma_batch = self.actor_critic.action_std.flatten(0,1)
-                entropy_batch = self.actor_critic.entropy.flatten(0,1)
-
+                mu_batch = mu_batch.flatten(0,1)
+                sigma_batch = sigma_batch.flatten(0,1)
+                entropy_batch = entropy_batch.flatten(0,1)
 
                 # KL
                 if self.desired_kl != None and self.schedule == 'adaptive':
