@@ -511,6 +511,7 @@ class CMAActorCritic(nn.Module):
     def get_actions_log_prob(self, actions):
         # actions = torch.stack(tuple([self.ac.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
         # return self.ac.actor.distribution.log_prob(actions).sum(dim=-1)
+        raise NotImplementedError
         return torch.stack([self.ac.get_actions_log_prob(actions[:, idx, :]) for idx in range(self.team_size)], dim=1)
 
     def evaluate_inference(self, observations, **kwargs):
