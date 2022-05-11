@@ -100,6 +100,8 @@ class IMAPPO:
         mean_value_loss = 0
         mean_surrogate_loss = 0
         mean_ratio_val = 0
+        mean_jr_den = 0
+        mean_jr_num = 0
         mean_advantage_val = 0
 
         if self.actor_critic.is_recurrent:
@@ -164,15 +166,20 @@ class IMAPPO:
                 mean_surrogate_loss += surrogate_loss.item()
                 mean_ratio_val += ratio.mean().item()
                 mean_advantage_val += advantages_batch.mean().item()
+                mean_jr_num += actions_log_prob_batch.mean().item()
+                mean_jr_den += old_actions_log_prob_batch.mean().item()
+
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
         mean_ratio_val /= num_updates
         mean_advantage_val /= num_updates
+        mean_jr_num /= num_updates
+        mean_jr_den /= num_updates
         self.storage.clear()
 
-        return mean_value_loss, mean_surrogate_loss, {'mean_ratio_val': mean_ratio_val, 'mean_advantage_val': mean_advantage_val}
+        return mean_value_loss, mean_surrogate_loss, {'mean_ratio_val': mean_ratio_val, 'mean_advantage_val': mean_advantage_val, 'mean_jr_num': mean_jr_num, 'mean_jr_den' : mean_jr_den}
 
     def update_population(self,):
         self.actor_critic.redraw_ac_networks()
