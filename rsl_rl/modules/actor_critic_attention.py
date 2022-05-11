@@ -142,6 +142,15 @@ class ActorCriticAttention(nn.Module):
     def get_actions_log_prob(self, actions):
         return self.distribution.log_prob(actions).sum(dim=-1)
 
+    def update_dist_and_get_actions_log_prob(self, observations, actions):
+        self.update_distribution(observations)
+        return self.distribution.log_prob(actions).sum(dim=-1)
+
+    def update_distribution_and_get_actions_log_prob_mu_sigma_entropy(self, observations, actions):
+        self.update_distribution(observations)
+        return self.distribution.log_prob(actions).sum(dim=-1), self.distribution.mean, self.distribution.stddev, self.entropy
+
+
     def act_inference(self, observations):
         actions_mean = self.actor(observations)
         return actions_mean

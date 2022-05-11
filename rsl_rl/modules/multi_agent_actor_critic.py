@@ -319,8 +319,8 @@ class MultiTeamCMAAC(nn.Module):
         actions = self.teamacs[0].act(observations)
         return actions
     
-    def get_actions_log_prob(self, actions):
-        return self.teamacs[0].get_actions_log_prob(actions).view(-1, self.team_size, 1)#.sum(dim=-1)
+    def update_distribution_and_get_actions_log_prob_mu_sigma_entropy(self, obs, actions):
+        return self.teamacs[0].update_distribution_and_get_actions_log_prob_mu_sigma_entropy(obs, actions)
     
     def evaluate_inference(self, observations, **kwargs):
         values = [ac.evaluate(observations[:, self.teams[idx],:]) for idx, ac in self.teamacs]
@@ -508,11 +508,26 @@ class CMAActorCritic(nn.Module):
         actions = torch.stack(tuple([self.ac.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
         return actions
     
-    def get_actions_log_prob(self, actions):
+    def update_distribution_and_get_actions_log_prob(self, obs, actions):
         # actions = torch.stack(tuple([self.ac.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
         # return self.ac.actor.distribution.log_prob(actions).sum(dim=-1)
-        return torch.stack([self.ac.get_actions_log_prob(actions[:, idx, :]) for idx in range(self.team_size)], dim=1)
+        return torch.stack([self.ac.update_dist_and_get_actions_log_prob(obs[:, idx,:], actions[:, idx, :]) for idx in range(self.team_size)], dim=1)
 
+    def update_distribution_and_get_actions_log_prob_mu_sigma_entropy(self, obs, actions):
+        # actions = torch.stack(tuple([self.ac.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
+        # return self.ac.actor.distribution.log_prob(actions).sum(dim=-1)
+        log_prob = []
+        mu = []
+        sigma = []
+        entropy = []
+        for idx in range(self.team_size):
+            lp, m, s, e = self.ac.update_distribution_and_get_actions_log_prob_mu_sigma_entropy(obs[:, idx,:], actions[:, idx, :])
+            log_prob.append(lp)
+            mu.append(m)
+            sigma.append(s)
+            entropy.append(e)
+        return torch.stack(tuple(log_prob), dim=1), torch.stack(tuple(mu), dim=1), torch.stack(tuple(sigma), dim=1), torch.stack(tuple(entropy), dim=1) 
+    
     def evaluate_inference(self, observations, **kwargs):
         values = []
         values = [self.ac.evaluate(observations[:, 0,:])]
