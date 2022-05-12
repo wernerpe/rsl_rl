@@ -39,7 +39,8 @@ import torch
 from rsl_rl.algorithms import PPO, IMAPPO, JRMAPPO
 from rsl_rl.modules import MAActorCritic, MultiTeamCMAAC
 from rsl_rl.env import VecEnv
-
+import yaml
+import os
 
 class MAOnPolicyRunner:
     actor_critic_class: MultiTeamCMAAC
@@ -81,6 +82,7 @@ class MAOnPolicyRunner:
 
         # Log
         self.log_dir = log_dir
+        self.track_cfg = self.cfg['track_cfgs']
         self.writer = None
         self.tot_timesteps = 0
         self.tot_time = 0
@@ -88,10 +90,17 @@ class MAOnPolicyRunner:
 
         _, _ = self.env.reset()
     
+    def store_cfgs(self,):
+                with open(self.log_dir + '/cfg_train.yml', 'w') as outfile:
+                    yaml.dump(self.cfg, outfile, default_flow_style=False)
+
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # initialize writer
         if self.log_dir is not None and self.writer is None:
             self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
+            if self.track_cfg:
+                self.store_cfgs()
+
         if init_at_random_ep_len:
             self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
         obs = self.env.get_observations()
