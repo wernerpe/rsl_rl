@@ -511,12 +511,7 @@ class CMAActorCritic(nn.Module):
     def update_distribution_and_get_actions_log_prob(self, obs, actions):
         # actions = torch.stack(tuple([self.ac.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
         # return self.ac.actor.distribution.log_prob(actions).sum(dim=-1)
-<<<<<<< HEAD
-        raise NotImplementedError
-        return torch.stack([self.ac.get_actions_log_prob(actions[:, idx, :]) for idx in range(self.team_size)], dim=1)
-=======
         return torch.stack([self.ac.update_dist_and_get_actions_log_prob(obs[:, idx,:], actions[:, idx, :]) for idx in range(self.team_size)], dim=1)
->>>>>>> ebac775a1f62c5f7fce60eab33a4ceaeac395a58
 
     def update_distribution_and_get_actions_log_prob_mu_sigma_entropy(self, obs, actions):
         # actions = torch.stack(tuple([self.ac.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
