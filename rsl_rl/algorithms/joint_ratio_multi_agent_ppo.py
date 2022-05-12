@@ -107,7 +107,8 @@ class JRMAPPO:
         mean_jr_den = 0
         mean_jr_num = 0
         mean_advantage_values = 0
-        
+        mean_mu0_batch = 0
+
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         elif self.actor_critic.is_attentive:
@@ -141,7 +142,7 @@ class JRMAPPO:
 
 
                 # Surrogate loss, using the joint probability ratios of all team members
-                ratio = torch.squeeze(torch.exp(torch.sum(actions_log_prob_batch, dim = 1) - torch.sum(old_actions_log_prob_batch, dim = 1)))
+                ratio = torch.squeeze(torch.exp(torch.sum(actions_log_prob_batch, dim = 1) - torch.sum(old_actions_log_prob_batch.squeeze(), dim = 1)))
                 surrogate = -torch.squeeze(advantages_batch) * ratio
                 surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(ratio, 1.0 - self.clip_param,
                                                                                 1.0 + self.clip_param)
@@ -181,6 +182,7 @@ class JRMAPPO:
                 mean_advantage_values += advantages_batch.mean().item()
                 mean_jr_num += torch.sum(actions_log_prob_batch, dim = 1).mean().item()
                 mean_jr_den += torch.sum(old_actions_log_prob_batch, dim = 1).mean().item()
+                mean_mu0_batch += mu_batch[:, 0].mean().item()
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
@@ -189,10 +191,15 @@ class JRMAPPO:
         mean_advantage_values /= num_updates
         mean_jr_num /= num_updates
         mean_jr_den /= num_updates
-        
+        mean_mu0_batch /= num_updates
+
         self.storage.clear()
 
-        return mean_value_loss, mean_surrogate_loss, {'mean_joint_ratio_val': mean_joint_ratio_values, 'mean_advantage_val': mean_advantage_values, 'mean_jr_num': mean_jr_num, 'mean_jr_den': mean_jr_den}
+        return mean_value_loss, mean_surrogate_loss, {'mean_joint_ratio_val': mean_joint_ratio_values, 
+                                                      'mean_advantage_val': mean_advantage_values, 
+                                                      'mean_jr_num': mean_jr_num, 
+                                                      'mean_jr_den': mean_jr_den, 
+                                                      'mean_mu0': mean_mu0_batch}
 
     def update_population(self,):
         self.actor_critic.redraw_ac_networks()
