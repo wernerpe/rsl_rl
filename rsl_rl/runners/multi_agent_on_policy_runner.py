@@ -50,7 +50,7 @@ class MAOnPolicyRunner:
                  log_dir=None,
                  device='cpu',
                  num_agents = 2):
-
+        self.train_cfg = train_cfg
         self.cfg=train_cfg["runner"]
         self.alg_cfg = train_cfg["algorithm"]
         self.policy_cfg = train_cfg["policy"]
@@ -82,7 +82,7 @@ class MAOnPolicyRunner:
 
         # Log
         self.log_dir = log_dir
-        self.track_cfg = self.cfg['track_cfgs']
+        self.track_cfg = train_cfg['track_cfgs']
         self.writer = None
         self.tot_timesteps = 0
         self.tot_time = 0
@@ -92,7 +92,7 @@ class MAOnPolicyRunner:
     
     def store_cfgs(self,):
                 with open(self.log_dir + '/cfg_train.yml', 'w') as outfile:
-                    yaml.dump(self.cfg, outfile, default_flow_style=False)
+                    yaml.dump(self.train_cfg, outfile, default_flow_style=False)
 
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # initialize writer

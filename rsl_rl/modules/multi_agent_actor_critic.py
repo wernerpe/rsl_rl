@@ -249,8 +249,8 @@ class MultiTeamCMAAC(nn.Module):
 
         self.max_num_models = 40
         self.draw_probs_unnorm = np.ones((self.max_num_models,))
-        self.draw_probs_unnorm[0:-3] = 0.4/(self.max_num_models-3)
-        self.draw_probs_unnorm[-3:] = 0.6/3
+        self.draw_probs_unnorm[0:-5] = 0.7/(self.max_num_models-3)
+        self.draw_probs_unnorm[-5:] = 0.3/5
 
         self.past_models = [self.teamacs[0].state_dict()]
 
@@ -505,7 +505,7 @@ class CMAActorCritic(nn.Module):
         return actions
     
     def act_inference(self, observations, **kwargs):
-        actions = torch.stack(tuple([self.ac.actor.act_inference(observations[:, idx, :]) for idx in range(self.team_size)]), dim = 1)
+        actions = torch.stack(tuple([self.ac.act_inference(observations[:, idx, :]).detach() for idx in range(self.team_size)]), dim = 1)
         return actions
     
     def update_distribution_and_get_actions_log_prob(self, obs, actions):
