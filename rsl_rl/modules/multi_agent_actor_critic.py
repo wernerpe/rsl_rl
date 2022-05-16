@@ -62,7 +62,7 @@ class MAActorCritic():
         for idx in range(num_agents):
             self.agentratings.append((trueskill.Rating(mu=0),))
 
-        self.max_num_models = 40
+        self.max_num_models = kwargs['max_num_old_models']
         self.draw_probs_unnorm = np.ones((self.max_num_models,))
         self.draw_probs_unnorm[0:-3] = 0.4/(self.max_num_models-3)
         self.draw_probs_unnorm[-3:] = 0.6/3
@@ -188,7 +188,7 @@ class MAActorCritic():
         if len(self.past_models) !=self.max_num_models:
             prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):]) * self.draw_probs_unnorm[-len(self.past_models):]
         else:
-            prob = self.draw_probs_unnorm
+            prob = 1/np.sum(self.draw_probs_unnorm + 1e-4) *(self.draw_probs_unnorm + 1e-4)
 
         idx = np.random.choice(len(self.past_models), self.num_agents-1, p = prob)
         for op_id, past_model_id in enumerate(idx):
