@@ -93,6 +93,9 @@ class MAOnPolicyRunner:
     def store_cfgs(self,):
                 with open(self.log_dir + '/cfg_train.yml', 'w') as outfile:
                     yaml.dump(self.train_cfg, outfile, default_flow_style=False)
+                    
+                with open(self.log_dir + '/cfg.yml', 'w') as outfile:
+                    yaml.dump(self.env.cfg, outfile, default_flow_style=False)
 
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # initialize writer
@@ -304,10 +307,10 @@ class MAOnPolicyRunner:
         for path in paths:
             dict = torch.load(path)
             info = dict['infos']
-            mu = info['trueskill']['mu']
-            sigma = info['trueskill']['sigma']
-            self.alg.actor_critic.past_ratings_mu.append(mu)
-            self.alg.actor_critic.past_ratings_sigma.append(sigma)
+            #mu = info['trueskill']['mu']
+            #sigma = info['trueskill']['sigma']
+            #self.alg.actor_critic.past_ratings_mu.append(mu)
+            #self.alg.actor_critic.past_ratings_sigma.append(sigma)
             self.alg.actor_critic.past_models.append(dict['model_state_dict'])
 
     def get_inference_policy(self, device=None):

@@ -360,11 +360,8 @@ class MultiTeamCMAAC(nn.Module):
 
         #select model to load
         #renormalize dist
-        if len(self.past_models) !=self.max_num_models:
-            prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):]) * self.draw_probs_unnorm[-len(self.past_models):]
-        else:
-            prob = self.draw_probs_unnorm
-
+        #if len(self.past_models) !=self.max_num_models:
+        prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):] + 1e-4) * (self.draw_probs_unnorm[-len(self.past_models):] + 1e-4)
         idx = np.random.choice(len(self.past_models), self.num_teams-1, p = prob)
         for agent_id, past_model_id in enumerate(idx):
             op_id = agent_id + 1
