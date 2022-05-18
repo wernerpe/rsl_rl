@@ -322,7 +322,7 @@ class MultiTeamCMAAC(nn.Module):
     def update_distribution_and_get_actions_log_prob_mu_sigma_entropy(self, obs, actions):
         return self.teamacs[0].update_distribution_and_get_actions_log_prob_mu_sigma_entropy(obs, actions)
     
-    def evaluate_inference(self, observations, **kwargs):
+    def evaluate_inference_factors(self, observations, **kwargs):
         values = [ac.evaluate(observations[:, self.teams[idx],:]) for idx, ac in self.teamacs]
         values = torch.cat(tuple(values), dim = 1)
         return values
