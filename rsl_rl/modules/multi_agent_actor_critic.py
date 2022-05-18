@@ -33,8 +33,7 @@ class MAActorCritic():
         self.teams = [torch.tensor([idx for idx in range(self.team_size*start, self.team_size*start+self.team_size)], dtype=torch.long) for start in range(self.num_teams)]
 
         if self.is_attentive:
-            self.ac1 = ActorCriticAttention(num_ego_obs=kwargs['num_ego_obs'],
-                                            num_ado_obs=kwargs['num_ado_obs'],
+            self.ac1 = ActorCriticAttention(
                                             num_actions=num_actions,
                                             num_agents=num_agents,
                                             actor_hidden_dims=actor_hidden_dims,
