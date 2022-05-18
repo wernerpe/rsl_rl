@@ -329,6 +329,8 @@ class MultiTeamCMAAC(nn.Module):
     
     def evaluate(self, critic_observations, **kwargs):
         value = self.teamacs[0].evaluate(critic_observations)
+        #sum factors of value prediction
+        value[:,:, 1] = torch.sum(value[:,:,1], dim =1).view(-1, 1)
         return value
 
     def update_ac_ratings(self, infos):
