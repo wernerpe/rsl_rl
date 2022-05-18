@@ -1,5 +1,4 @@
 
-from lib2to3.pgen2.literals import simple_escapes
 import torch
 import torch.nn as nn
 import torch.optim as optim

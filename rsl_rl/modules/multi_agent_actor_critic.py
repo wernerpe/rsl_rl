@@ -33,8 +33,8 @@ class MAActorCritic():
         self.teams = [torch.tensor([idx for idx in range(self.team_size*start, self.team_size*start+self.team_size)], dtype=torch.long) for start in range(self.num_teams)]
 
         if self.is_attentive:
-            self.ac1 = ActorCriticAttention(num_ego_obs=35,
-                                            num_ado_obs=6,
+            self.ac1 = ActorCriticAttention(num_ego_obs=kwargs['num_ego_obs'],
+                                            num_ado_obs=kwargs['num_ado_obs'],
                                             num_actions=num_actions,
                                             num_agents=num_agents,
                                             actor_hidden_dims=actor_hidden_dims,
@@ -413,16 +413,16 @@ class CMAActorCritic(nn.Module):
         self.action_entropies = []
 
         if self.is_attentive:
-            self.ac = ActorCriticAttention(num_ego_obs=35,
-                                        num_ado_obs=6,
-                                        num_actions=num_actions,
-                                        num_agents=num_agents,
-                                        actor_hidden_dims=actor_hidden_dims,
-                                        critic_hidden_dims=critic_hidden_dims,
-                                        critic_output_dim=critic_output_dim,
-                                        activation=activation,
-                                        init_noise_std=init_noise_std, 
-                                        **kwargs)
+            self.ac = ActorCriticAttention(#num_ego_obs=kwargs['num_ego_obs'],
+                                            #num_ado_obs=kwargs['num_ado_obs'],
+                                            num_actions=num_actions,
+                                            num_agents=num_agents,
+                                            actor_hidden_dims=actor_hidden_dims,
+                                            critic_hidden_dims=critic_hidden_dims,
+                                            critic_output_dim=critic_output_dim,
+                                            activation=activation,
+                                            init_noise_std=init_noise_std, 
+                                            **kwargs)
         else:
             raise NotImplementedError
 
@@ -437,12 +437,12 @@ class CMAActorCritic(nn.Module):
         # for idx in range(num_agents):
         #     self.agentratings.append((trueskill.Rating(mu=0),))
 
-        self.max_num_models = 40
-        self.draw_probs_unnorm = np.ones((self.max_num_models,))
-        self.draw_probs_unnorm[0:-3] = 0.4/(self.max_num_models-3)
-        self.draw_probs_unnorm[-3:] = 0.6/3
+        #self.max_num_models = 40
+        #self.draw_probs_unnorm = np.ones((self.max_num_models,))
+        #self.draw_probs_unnorm[0:-3] = 0.4/(self.max_num_models-3)
+        #self.draw_probs_unnorm[-3:] = 0.6/3
 
-        self.past_models = [[self.ac.actor.state_dict(), self.ac.critic.state_dict()]]
+        #self.past_models = [[self.ac.actor.state_dict(), self.ac.critic.state_dict()]]
         #self.past_ratings_mu = [0]
         #self.past_ratings_sigma = [self.agentratings[0][0].sigma]
 
