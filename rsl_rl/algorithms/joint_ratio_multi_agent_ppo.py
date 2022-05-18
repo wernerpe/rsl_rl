@@ -155,18 +155,19 @@ class JRMAPPO:
                     value_losses_individual = (value_batch[:,:,0] - returns_individual_batch).pow(2)
                     value_losses_individual_clipped = (value_individual_clipped - returns_individual_batch).pow(2)
                     value_loss_individual = torch.max(value_losses_individual, value_losses_individual_clipped).mean()
-                   
-                    value_team_clipped = target_values_team_batch + (value_batch[:,:,1] - target_values_team_batch).clamp(-self.clip_param,
+
+                    #since both entries the same pick team entry for agent 0 by convention
+                    value_team_clipped = target_values_team_batch[:,0] + (value_batch[:,0,1] - target_values_team_batch[:,0]).clamp(-self.clip_param,
                                                                                                     self.clip_param)
-                    value_losses_team = (torch.sum(value_batch[:,:,1] - returns_team_batch, dim =1)).pow(2)
-                    value_losses_team_clipped = (torch.sum(value_team_clipped - returns_team_batch, dim=1)).pow(2)
+                    value_losses_team = (value_batch[:,0,1] - returns_team_batch[:,0]).pow(2)
+                    value_losses_team_clipped = (value_team_clipped - returns_team_batch[:,0]).pow(2)
                     value_loss_team = torch.max(value_losses_team, value_losses_team_clipped).mean()
-                    
-#                  raise ValueError('check the value output index such that team and individual are correctly assigned')
+ 
 
                 else: 
                     value_loss_individual = (returns_individual_batch - value_batch[:,:,0]).pow(2).mean()
-                    value_loss_team = (torch.sum(returns_team_batch - value_batch[:,:,1], dim = 1)).pow(2).mean()
+                    #since both entries the same pick team entry for agent 0 by convention
+                    value_loss_team = (returns_team_batch[:,0] - value_batch[:,0,1]).pow(2).mean()
 
                 loss = surrogate_loss + self.value_loss_coef * (value_loss_team + value_loss_individual)  - self.entropy_coef * entropy_batch.mean()
 
