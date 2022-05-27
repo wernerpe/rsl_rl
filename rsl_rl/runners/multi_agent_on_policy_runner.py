@@ -192,6 +192,9 @@ class MAOnPolicyRunner:
         mean_std = self.alg.actor_critic.std.mean()
         fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
 
+        mean_action_mean_per_dim = self.alg.actor_critic.mean.mean(dim=0)
+        mean_action_std_per_dim = self.alg.actor_critic.std.mean(dim=0)
+
         self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
         self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
         if locs['aux_info_loss']:
@@ -204,6 +207,10 @@ class MAOnPolicyRunner:
         self.writer.add_scalar('Perf/collection time', locs['collection_time'], locs['it'])
         self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
         #self.writer.add_scalar('Agent/Trueskill', self.alg.actor_critic.agentratings[0][0].mu, locs['it'])
+
+        for action_id, (action_mean, action_std) in enumerate(zip(mean_action_mean_per_dim, mean_action_std_per_dim)):
+            self.writer.add_scalar('Policy/mean_action_mean' + str(action_id), action_mean.item(), locs['it'])
+            self.writer.add_scalar('Policy/mean_action_std' + str(action_id), action_std.item(), locs['it'])
         
         if len(locs['rewbuffer']) > 0:
             self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
@@ -218,11 +225,11 @@ class MAOnPolicyRunner:
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
 
 
-        str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
+        string = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
 
         if len(locs['rewbuffer']) > 0:
             log_string = (f"""{'#' * width}\n"""
-                          f"""{str.center(width, ' ')}\n\n"""
+                          f"""{string.center(width, ' ')}\n\n"""
                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
@@ -237,7 +244,7 @@ class MAOnPolicyRunner:
                         #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
         else:
             log_string = (f"""{'#' * width}\n"""
-                          f"""{str.center(width, ' ')}\n\n"""
+                          f"""{string.center(width, ' ')}\n\n"""
                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""

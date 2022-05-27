@@ -66,6 +66,7 @@ class CentralizedMultiAgentRolloutStorage:
         else:
             self.privileged_observations = None
         self.rewards = torch.zeros(num_transitions_per_env, num_envs, num_agents, 2, device=self.device)
+        # self.rewards = torch.zeros(num_transitions_per_env, num_envs, 1, num_agents, 2, device=self.device)
         self.actions = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, device=self.device)
         self.dones = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device).byte()
 
@@ -73,6 +74,8 @@ class CentralizedMultiAgentRolloutStorage:
         self.actions_log_prob = torch.zeros(num_transitions_per_env, num_envs, num_agents, 1, device=self.device)
         self.values = torch.zeros(num_transitions_per_env, num_envs, num_agents, 2, device=self.device)
         self.returns = torch.zeros(num_transitions_per_env, num_envs, num_agents, 2, device=self.device)
+        # self.values = torch.zeros(num_transitions_per_env, num_envs, 1, num_agents, 2, device=self.device)
+        # self.returns = torch.zeros(num_transitions_per_env, num_envs, 1, num_agents, 2, device=self.device)
         self.advantages = torch.zeros(num_transitions_per_env, num_envs, num_agents, 1, device=self.device)
         self.mu = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, device=self.device)
         self.sigma = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, device=self.device)
@@ -140,12 +143,18 @@ class CentralizedMultiAgentRolloutStorage:
                 next_values = self.values[step + 1]
             next_is_not_terminal = 1.0 - self.dones[step].float()
             delta = self.rewards[step] + next_is_not_terminal.unsqueeze(1) * gamma * next_values - self.values[step]
+            # delta = self.rewards[step].unsqueeze(dim=1).repeat(1, 1, 1, 1) + next_is_not_terminal.unsqueeze(1).unsqueeze(1) * gamma * next_values - self.values[step]
+            # delta = self.rewards[step] + next_is_not_terminal.unsqueeze(1).unsqueeze(1) * gamma * next_values - self.values[step]
             advantage = delta + next_is_not_terminal.unsqueeze(1) * gamma * lam * advantage
+            # advantage = delta + next_is_not_terminal.unsqueeze(1).unsqueeze(1) * gamma * lam * advantage
             self.returns[step] = advantage + self.values[step]
+            # self.returns[step] = advantage + torch.mean(self.values[step], dim=0)
 
         # Compute and normalize the advantages
         self.advantages = torch.sum(self.returns - self.values, dim = (-2,-1))
+        # self.advantages = torch.sum(self.returns - torch.mean(self.values, dim=1), dim = (-2,-1))
         self.advantages = (self.advantages - self.advantages.mean()) / (self.advantages.std() + 1e-8)
+        # FIXME: standardize each ensemble member separately?
 
     def get_statistics(self):
         done = self.dones

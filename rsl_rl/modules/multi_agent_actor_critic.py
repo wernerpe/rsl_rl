@@ -243,7 +243,7 @@ class MultiTeamCMAAC(nn.Module):
                                        critic_hidden_dims=[256, 256, 256],
                                        critic_output_dim=2,
                                        activation='elu',
-                                       init_noise_std=1.0,
+                                       init_noise_std=self.init_noise_std,
                                        **kwargs) for _ in range(self.num_teams)]
 
         self.max_num_models = 40
@@ -266,6 +266,10 @@ class MultiTeamCMAAC(nn.Module):
     @property
     def action_std(self):
         return self.teamacs[0].action_std
+
+    @property
+    def mean(self):
+        return self.teamacs[0].mean
     
     @property
     def std(self):
@@ -330,6 +334,7 @@ class MultiTeamCMAAC(nn.Module):
         value = self.teamacs[0].evaluate(critic_observations)
         #sum factors of value prediction
         value[:,:, 1] = torch.sum(value[:,:,1], dim =1).view(-1, 1)
+        # value[..., -1] = torch.sum(value[...,1], dim=-1).unsqueeze(-1)
         return value
 
     def update_ac_ratings(self, infos):
@@ -345,6 +350,18 @@ class MultiTeamCMAAC(nn.Module):
         #         self.agentratings[it] = (trueskill.Rating(mu, sigma),)
 
     def redraw_ac_networks(self):
+
+        width = 80
+        string = (
+          f"""{' ' * width}\n"""
+          f"""{' ' * width}\n"""
+          f"""{'#' * width}\n"""
+          f"""{'==> Re-drawing opponent networks ...'}\n"""
+          f"""{'#' * width}\n"""
+          f"""{' ' * width}\n"""
+          f"""{' ' * width}\n"""
+        )
+        print(string)
 
         teamac1 = self.teamacs[0]
 
@@ -460,6 +477,10 @@ class CMAActorCritic(nn.Module):
     @property
     def action_std(self):
         return torch.stack(tuple(self.action_stds), dim = 1)
+
+    @property
+    def mean(self):
+        return torch.mean(self.action_mean, dim = 1)
     
     @property
     def std(self):

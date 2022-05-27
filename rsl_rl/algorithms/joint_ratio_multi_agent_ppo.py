@@ -53,6 +53,8 @@ class JRMAPPO:
         self.max_grad_norm = max_grad_norm
         self.use_clipped_value_loss = use_clipped_value_loss
 
+        self.value_selector = torch.distributions.Categorical(probs=0.5*torch.ones((2,)).to(self.device))
+
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents):
         self.storage = CentralizedMultiAgentRolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents, self.device)
 
@@ -83,12 +85,14 @@ class JRMAPPO:
 
     def process_env_step(self, rewards, dones, infos):
         self.transition.rewards = rewards[:, self.actor_critic.teams[0], :].clone()
+        # self.transition.rewards = rewards[:, self.actor_critic.teams[0], :].clone().unsqueeze(dim=1).repeat(1, 1, 1, 1)
         self.transition.dones = dones
         if 'agent_active' in infos:
           self.transition.active_agents = 1.0 * infos['agent_active']
-        # Bootstrapping on time outs
+        # Bootstrapping on time outs  # FIXME: double-check this!
         if 'time_outs' in infos:
             self.transition.rewards += self.gamma * self.transition.values * infos['time_outs'].unsqueeze(1).unsqueeze(1).to(self.device)
+            # self.transition.rewards += self.gamma * self.transition.values * infos['time_outs'].unsqueeze(1).unsqueeze(1).unsqueeze(1).to(self.device)
 
         # Record the transition
         self.storage.add_transitions(self.transition)
@@ -124,6 +128,8 @@ class JRMAPPO:
                 sigma_batch = sigma_batch.flatten(0,1)
                 entropy_batch = entropy_batch.flatten(0,1)
 
+                # advantages_batch = advantages_batch.mean(dim=1)
+
                 # KL
                 if self.desired_kl != None and self.schedule == 'adaptive':
                     with torch.inference_mode():
@@ -148,7 +154,7 @@ class JRMAPPO:
                                                                                 1.0 + self.clip_param)
                 surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
 
-                # Value function loss
+                # Value function loss  # FIXME: zero-out some value function stochastically w/ e.g. 0.3?
                 if self.use_clipped_value_loss:
                     value_individual_clipped = target_values_individual_batch + (value_batch[:,:,0] - target_values_individual_batch).clamp(-self.clip_param,
                                                                                                     self.clip_param)
@@ -162,6 +168,19 @@ class JRMAPPO:
                     value_losses_team = (value_batch[:,0,1] - returns_team_batch[:,0]).pow(2)
                     value_losses_team_clipped = (value_team_clipped - returns_team_batch[:,0]).pow(2)
                     value_loss_team = torch.max(value_losses_team, value_losses_team_clipped).mean()
+
+                    # value_individual_clipped = target_values_individual_batch + (value_batch[..., 0] - target_values_individual_batch).clamp(-self.clip_param,
+                    #                                                                                 self.clip_param)
+                    # value_losses_individual = (value_batch[..., 0] - returns_individual_batch).pow(2)
+                    # value_losses_individual_clipped = (value_individual_clipped - returns_individual_batch).pow(2)
+                    # value_loss_individual = torch.max(value_losses_individual, value_losses_individual_clipped).mean(dim=0).mean(dim=-1)
+
+                    # #since both entries the same pick team entry for agent 0 by convention
+                    # value_team_clipped = target_values_team_batch[..., 0] + (value_batch[...,0,1] - target_values_team_batch[...,0]).clamp(-self.clip_param,
+                    #                                                                                 self.clip_param)
+                    # value_losses_team = (value_batch[...,0,1] - returns_team_batch[...,0]).pow(2)
+                    # value_losses_team_clipped = (value_team_clipped - returns_team_batch[...,0]).pow(2)
+                    # value_loss_team = torch.max(value_losses_team, value_losses_team_clipped).mean(dim=0)
  
 
                 else: 
@@ -169,15 +188,19 @@ class JRMAPPO:
                     #since both entries the same pick team entry for agent 0 by convention
                     value_loss_team = (returns_team_batch[:,0] - value_batch[:,0,1]).pow(2).mean()
 
-                loss = surrogate_loss + self.value_loss_coef * (value_loss_team + value_loss_individual)  - self.entropy_coef * entropy_batch.mean()
+                # loss = surrogate_loss + self.value_loss_coef * (value_loss_team + value_loss_individual)  - self.entropy_coef * entropy_batch.mean()
+
+                value_selectors = self.value_selector.sample((5,))
+                loss = surrogate_loss + self.value_loss_coef * (1. * (value_loss_team + value_loss_individual)).mean()  - self.entropy_coef * entropy_batch.mean()
 
                 # Gradient step
                 self.optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
+                grad_norm = nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
-                mean_value_loss += value_loss_team.item() + value_loss_individual.item() 
+                # mean_value_loss += value_loss_team.item() + value_loss_individual.item() 
+                mean_value_loss += value_loss_team.mean().item() + value_loss_individual.mean().item() 
                 mean_surrogate_loss += surrogate_loss.item()
                 mean_joint_ratio_values += ratio.mean().item()
                 mean_advantage_values += advantages_batch.mean().item()

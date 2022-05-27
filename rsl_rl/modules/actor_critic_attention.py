@@ -83,6 +83,14 @@ class ActorCriticAttention(nn.Module):
           activation=activation,
           encoder=self.encoder,
         )
+        # self.actor = ActorAttentionStddev(
+        #   input_dim=mlp_input_dim_a, 
+        #   hidden_dims=actor_hidden_dims, 
+        #   output_dim=num_actions, 
+        #   activation=activation,
+        #   encoder=self.encoder,
+        #   init_std=init_noise_std,
+        # )
 
         # Value function
         self.critic = CriticAttention(
@@ -92,6 +100,15 @@ class ActorCriticAttention(nn.Module):
           activation=activation,
           encoder=self.encoder,
         )
+        # self._n_critics = 1
+        # self.critics = [CriticAttention(
+        #   input_dim=mlp_input_dim_c, 
+        #   hidden_dims=critic_hidden_dims, 
+        #   output_dims=critic_output_dim,
+        #   activation=activation,
+        #   encoder=self.encoder,
+        # ) for _ in range(self._n_critics)]
+        # [critic.to('cuda:0') for critic in self.critics]
 
         print(f"Actor MLP: {self.actor}")
         print(f"Critic MLP: {self.critic}")
@@ -135,6 +152,9 @@ class ActorCriticAttention(nn.Module):
         mean = self.actor(observations)
         self.distribution = Normal(mean, mean*0. + self.std)
 
+        # mean, std = self.actor(observations)
+        # self.distribution = Normal(mean, std)
+
     def act(self, observations, **kwargs):
         self.update_distribution(observations)
         return self.distribution.sample()
@@ -153,11 +173,14 @@ class ActorCriticAttention(nn.Module):
 
     def act_inference(self, observations):
         actions_mean = self.actor(observations)
+        # actions_mean, _ = self.actor(observations)
         return actions_mean
 
     def evaluate(self, critic_observations, **kwargs):
         value = self.critic(critic_observations)
         return value
+        # values = [critic(critic_observations) for critic in self.critics]
+        # return torch.stack(values, dim=1)[:, 0]
 
 
 class ActorAttention(nn.Module):
@@ -183,6 +206,67 @@ class ActorAttention(nn.Module):
     def forward(self, observations):
         latent = self._encoder(observations)
         return self._network(latent)
+
+
+class ActorAttentionStddev(nn.Module):
+  
+    def __init__(self, input_dim, hidden_dims, output_dim, activation, encoder, init_std):
+
+        super(ActorAttentionStddev, self).__init__()
+
+        self._encoder = encoder
+
+        self.output_dim = output_dim
+        self.init_std = np.log(np.exp(init_std) - 1.)
+        self.min_std = 1e-2
+
+        actor_layers = []
+        actor_layers.append(nn.Linear(input_dim, hidden_dims[0]))
+        actor_layers.append(nn.LayerNorm(hidden_dims[0]))
+        actor_layers.append(nn.Tanh())
+        for l in range(len(hidden_dims)):
+            if l == len(hidden_dims) - 1:
+                actor_layers.append(nn.Linear(hidden_dims[l], 2*output_dim))
+            else:
+                actor_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
+                actor_layers.append(activation)
+        self._network = nn.Sequential(*actor_layers)
+
+    def forward(self, observations):
+        latent = self._encoder(observations)
+        output = self._network(latent)
+
+        mean, std = torch.split(output, self.output_dim, dim=-1)
+        std = nn.functional.softplus(std + self.init_std) + self.min_std
+        # mean = 5.0 * nn.functional.tanh(mean / 5.0)
+
+        return mean, std
+
+
+from torch.distributions.utils import _standard_normal
+
+class TruncatedNormal(torch.distributions.Normal):
+    def __init__(self, loc, scale, low=-1.0, high=1.0, eps=1e-6):
+        super().__init__(loc, scale, validate_args=False)
+        self.low = low
+        self.high = high
+        self.eps = eps
+
+    def _clamp(self, x):
+        clamped_x = torch.clamp(x, self.low + self.eps, self.high - self.eps)
+        x = x - x.detach() + clamped_x.detach()
+        return x
+
+    def sample(self, clip=None, sample_shape=torch.Size()):
+        shape = self._extended_shape(sample_shape)
+        eps = _standard_normal(shape,
+                               dtype=self.loc.dtype,
+                               device=self.loc.device)
+        eps *= self.scale
+        if clip is not None:
+            eps = torch.clamp(eps, -clip, clip)
+        x = self.loc + eps
+        return self._clamp(x)
 
 
 class CriticAttention(nn.Module):
