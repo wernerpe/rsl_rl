@@ -188,25 +188,26 @@ class MAOnPolicyRunner:
         eval_ep_rewards_tot = 0.*already_done
         eval_ep_rewards_team = 0.*already_done
         eval_ep_duration = 0.*already_done
-        eval_ep_terminal_ranks = 0.*already_done
+        eval_ep_terminal_ranks = 0.*self.env.ranks
 
         self.alg.actor_critic.eval()
         policy = self.alg.actor_critic.act_inference
-        for ev_it in range(self.env.max_episode_length):
+        for ev_it in range(self.env.max_episode_length+1):
             actions = policy(obs)
             obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
             
             eval_ep_duration += ev_it*dones
-            eval_ep_terminal_ranks += self.env.ranks[:, 0].view(-1,1) * (~already_done)*dones
+            eval_ep_terminal_ranks += self.env.ranks[:, :] * (~already_done)*dones
             eval_ep_rewards_tot += torch.sum(rewards[:,0,:], dim = 1).view(-1,1)*(~already_done)
             eval_ep_rewards_team += (rewards[:,0,1]).view(-1,1)*(~already_done)
             
             already_done |= dones
         
+        ratings = self.alg.update_ratings(eval_ep_terminal_ranks, eval_ep_duration, self.env.max_episode_length)
         mean_ep_duration = torch.mean(eval_ep_duration).item()
         mean_ep_rewards_tot = torch.mean(eval_ep_rewards_tot).item()
         mean_ep_rewards_team = torch.mean(eval_ep_rewards_team).item()
-        mean_ep_ranks = torch.mean(eval_ep_terminal_ranks).item()
+        mean_ep_ranks = torch.mean(eval_ep_terminal_ranks, dim = 0)[0].item()
 
         width = 80
         pad = 35
@@ -216,11 +217,15 @@ class MAOnPolicyRunner:
                     f"""{'AVG Duration:':>{pad}} {mean_ep_duration:.4f}\n"""
                     f"""{'AVG Reward:':>{pad}} {mean_ep_rewards_tot:.4f}\n"""
                     f"""{'AVG Reward Team:':>{pad}} {mean_ep_rewards_team:.4f}\n"""
-                    f"""{'AVG Rank:':>{pad}} {mean_ep_ranks:.4f}\n""")
+                    f"""{'AVG Rank:':>{pad}} {mean_ep_ranks:.4f}\n"""
+                    f"""{'Trueskill:':>{pad}} {ratings[0][0].mu:.4f}\n"""
+                    )
         self.writer.add_scalar('Eval/episode_duration', mean_ep_duration, it)
         self.writer.add_scalar('Eval/episode_reward', mean_ep_rewards_tot, it)
         self.writer.add_scalar('Eval/episode_reward_team', mean_ep_rewards_team, it)
         self.writer.add_scalar('Eval/episode_ranks', mean_ep_ranks, it)
+        self.writer.add_scalar('Eval/rating 0', ratings[0][0].mu, it)
+        self.writer.add_scalar('Eval/rating 1', ratings[1][0].mu, it)
         
         print(log_string)
 

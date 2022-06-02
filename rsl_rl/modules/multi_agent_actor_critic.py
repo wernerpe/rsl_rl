@@ -158,6 +158,12 @@ class MAActorCritic():
     def evaluate(self, critic_observations, **kwargs):
         value = self.ac1.critic(critic_observations)
         return value
+    
+    def get_ratings(self,):
+        return self.agentratings
+
+    def set_ratings(self, ratings):
+        self.agentratings = ratings
 
     def update_ac_ratings(self, infos):
         #update performance metrics of current policies
