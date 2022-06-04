@@ -52,8 +52,12 @@ class IMAPPO:
         self.max_grad_norm = max_grad_norm
         self.use_clipped_value_loss = use_clipped_value_loss
 
+        self.n_critics = self.actor_critic.n_critics
+
+        self.value_selector = torch.distributions.Categorical(probs=0.5*torch.ones((2,)).to(self.device))
+
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents):
-        self.storage = MultiAgentRolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents, self.device)
+        self.storage = MultiAgentRolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents, self.n_critics, self.device)
 
     def test_mode(self):
         self.actor_critic.test()
@@ -79,13 +83,15 @@ class IMAPPO:
         return all_agent_actions
 
     def process_env_step(self, rewards, dones, infos):
-        self.transition.rewards = torch.sum(rewards.clone()[:, 0, :], dim = 1)
+        # self.transition.rewards = torch.sum(rewards.clone()[:, 0, :], dim = 1)
+        self.transition.rewards = torch.sum(rewards.clone()[:, 0, :], dim = 1).unsqueeze(dim=1).unsqueeze(dim=1).repeat(1, self.n_critics, 1)
         self.transition.dones = dones[:, 0]
         #if 'agent_active' in infos:
         #  self.transition.active_agents = 1.0 * infos['agent_active']
         # Bootstrapping on time outs
         if 'time_outs' in infos:
-            self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
+            # self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
+            self.transition.rewards += self.gamma * self.transition.values * infos['time_outs'].unsqueeze(1).unsqueeze(1).to(self.device)
 
         # Record the transition
         self.storage.add_transitions(self.transition)
@@ -136,6 +142,7 @@ class IMAPPO:
                         for param_group in self.optimizer.param_groups:
                             param_group['lr'] = self.learning_rate
 
+                # advantages_batch = advantages_batch.mean(dim=1) - 0.5 * advantages_batch.std(dim=1)
 
                 # Surrogate loss
                 ratio = torch.exp(actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch))
@@ -150,11 +157,12 @@ class IMAPPO:
                                                                                                     self.clip_param)
                     value_losses = (value_batch - returns_batch).pow(2)
                     value_losses_clipped = (value_clipped - returns_batch).pow(2)
-                    value_loss = torch.max(value_losses, value_losses_clipped).mean()
+                    value_loss = torch.max(value_losses, value_losses_clipped).mean(dim=0)
                 else:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
-                loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
+                value_selectors = self.value_selector.sample((self.n_critics, 1))
+                loss = surrogate_loss + self.value_loss_coef * (value_selectors * value_loss).mean() - self.entropy_coef * entropy_batch.mean()
 
                 # Gradient step
                 self.optimizer.zero_grad()
@@ -162,7 +170,7 @@ class IMAPPO:
                 nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
-                mean_value_loss += value_loss.item()
+                mean_value_loss += value_loss.mean().item()
                 mean_surrogate_loss += surrogate_loss.item()
                 mean_ratio_val += ratio.mean().item()
                 mean_advantage_val += advantages_batch.mean().item()

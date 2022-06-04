@@ -30,6 +30,7 @@ class MAActorCritic():
         self.is_attentive = kwargs['attentive']
         self.num_teams = kwargs['numteams']
         self.team_size = kwargs['teamsize']
+        self.n_critics = kwargs['numcritics']
         self.teams = [torch.tensor([idx for idx in range(self.team_size*start, self.team_size*start+self.team_size)], dtype=torch.long) for start in range(self.num_teams)]
 
         if self.is_attentive:
@@ -39,7 +40,8 @@ class MAActorCritic():
                                             actor_hidden_dims=actor_hidden_dims,
                                             critic_hidden_dims=critic_hidden_dims,
                                             activation=activation,
-                                            init_noise_std=init_noise_std, 
+                                            init_noise_std=init_noise_std,
+                                            n_critics=self.n_critics,
                                             **kwargs)
         else:
             self.ac1 = ActorCritic( num_actor_obs,
@@ -87,6 +89,14 @@ class MAActorCritic():
     @property
     def std(self):
         return self.ac1.std
+
+    @property
+    def ego_action_mean(self):
+        return self.action_mean
+
+    @property
+    def ego_action_std(self):
+        return self.action_std
 
     @property
     def entropy(self):
@@ -156,7 +166,8 @@ class MAActorCritic():
         return values
     
     def evaluate(self, critic_observations, **kwargs):
-        value = self.ac1.critic(critic_observations)
+        # value = self.ac1.critic(critic_observations)
+        value = self.ac1.evaluate(critic_observations)
         return value
 
     def update_ac_ratings(self, infos):
@@ -232,6 +243,8 @@ class MultiTeamCMAAC(nn.Module):
         self.is_attentive = kwargs['attentive']
         self.num_teams = kwargs['numteams']
         self.team_size = kwargs['teamsize']
+
+        self.n_critics = kwargs['numcritics']
         
         self.is_recurrent = False
         self.teams = [torch.tensor([idx for idx in range(self.team_size*start, self.team_size*start+self.team_size)], dtype=torch.long) for start in range(self.num_teams)]
@@ -244,6 +257,7 @@ class MultiTeamCMAAC(nn.Module):
                                        critic_output_dim=2,
                                        activation='elu',
                                        init_noise_std=1.0,
+                                       n_critics=self.n_critics,
                                        **kwargs) for _ in range(self.num_teams)]
 
         self.max_num_models = 40
@@ -270,6 +284,14 @@ class MultiTeamCMAAC(nn.Module):
     @property
     def std(self):
         return self.teamacs[0].std
+    
+    @property
+    def ego_action_mean(self):
+        return self.teamacs[0].ego_mean
+    
+    @property
+    def ego_action_std(self):
+        return self.teamacs[0].ego_std
 
     @property
     def entropy(self):
@@ -329,7 +351,8 @@ class MultiTeamCMAAC(nn.Module):
     def evaluate(self, critic_observations, **kwargs):
         value = self.teamacs[0].evaluate(critic_observations)
         #sum factors of value prediction
-        value[:,:, 1] = torch.sum(value[:,:,1], dim =1).view(-1, 1)
+        # value[:,:, 1] = torch.sum(value[:,:,1], dim =1).view(-1, 1)
+        value[..., 1] = torch.mean(value[...,1], dim=-1).unsqueeze(dim=-1)
         return value
 
     def update_ac_ratings(self, infos):
@@ -393,6 +416,7 @@ class CMAActorCritic(nn.Module):
                         critic_output_dim=1,
                         activation='elu',
                         init_noise_std=1.0,
+                        n_critics=1,
                         **kwargs):
 
         #Adapt ac interface here -------
@@ -423,6 +447,7 @@ class CMAActorCritic(nn.Module):
                                             critic_output_dim=critic_output_dim,
                                             activation=activation,
                                             init_noise_std=init_noise_std, 
+                                            n_critics=n_critics,
                                             **kwargs)
         else:
             raise NotImplementedError
@@ -462,8 +487,20 @@ class CMAActorCritic(nn.Module):
         return torch.stack(tuple(self.action_stds), dim = 1)
     
     @property
+    def mean(self):
+        return torch.mean(self.action_mean, dim = 1)
+
+    @property
     def std(self):
         return torch.mean(self.action_std, dim = 1)
+
+    @property
+    def ego_mean(self):
+        return self.action_mean[:, 0]
+
+    @property
+    def ego_std(self):
+        return self.action_std[:, 0]
 
     @property
     def entropy(self):
