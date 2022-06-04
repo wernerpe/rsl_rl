@@ -4,7 +4,7 @@ import torch.optim as optim
 
 from rsl_rl.modules import MAActorCritic
 from rsl_rl.storage import MultiAgentRolloutStorage
-
+import trueskill
 #only track transitions of agent 1, agent 2 blindly runs old version of policy 
 #which gets exchanged periodically for the current version
 #generator of multi agent rollout storage only returns data on agent 1
@@ -101,6 +101,19 @@ class IMAPPO:
     def compute_returns(self, last_critic_obs):
         last_values = self.actor_critic.evaluate(last_critic_obs[:, 0, :]).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam)
+
+    def update_ratings(self, eval_ranks, eval_ep_duration, max_ep_len):
+        ratings = self.actor_critic.get_ratings()
+        for ranks, dur in zip(eval_ranks, eval_ep_duration):
+            new_ratings = trueskill.rate(ratings, ranks.cpu().numpy())
+            update_ratio = 1.0*dur.item()/max_ep_len
+            for it, (old, new) in enumerate(zip(ratings, new_ratings)):
+                mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
+                sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
+                ratings[it] = (trueskill.Rating(mu, sigma),)
+        self.actor_critic.set_ratings(ratings)
+        return ratings
+        
 
     def update(self):
         mean_value_loss = 0

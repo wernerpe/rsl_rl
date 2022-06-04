@@ -169,6 +169,12 @@ class MAActorCritic():
         # value = self.ac1.critic(critic_observations)
         value = self.ac1.evaluate(critic_observations)
         return value
+    
+    def get_ratings(self,):
+        return self.agentratings
+
+    def set_ratings(self, ratings):
+        self.agentratings = ratings
 
     def update_ac_ratings(self, infos):
         #update performance metrics of current policies
@@ -355,17 +361,14 @@ class MultiTeamCMAAC(nn.Module):
         value[..., 1] = torch.mean(value[...,1], dim=-1).unsqueeze(dim=-1)
         return value
 
+    def get_ratings(self,):
+        return self.teamacs[0].get_ratings()
+
+    def set_ratings(self, ratings):
+        self.teamacs[0].set_ratings(ratings)
+
     def update_ac_ratings(self, infos):
-        pass
-        # #update performance metrics of current policies
-        # if 'ranking' in infos:         
-        #     avgranking = infos['ranking'][0].cpu().numpy() #torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
-        #     update_ratio = infos['ranking'][1]
-        #     new_ratings = trueskill.rate(self.agentratings, avgranking)
-        #     for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
-        #         mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
-        #         sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
-        #         self.agentratings[it] = (trueskill.Rating(mu, sigma),)
+        self.teamacs[0].update_ac_ratings(infos)
 
     def redraw_ac_networks(self):
 
@@ -451,6 +454,10 @@ class CMAActorCritic(nn.Module):
                                             **kwargs)
         else:
             raise NotImplementedError
+
+        self.agentratings = []
+        for idx in range(num_agents):
+            self.agentratings.append((trueskill.Rating(mu=0),))
 
             
 #        if kwargs:
@@ -574,6 +581,23 @@ class CMAActorCritic(nn.Module):
     def evaluate(self, critic_observations, **kwargs):
         value = self.ac.evaluate(critic_observations)
         return value
+
+    def get_ratings(self,):
+        return self.agentratings
+
+    def set_ratings(self, ratings):
+        self.agentratings = ratings
+
+    def update_ac_ratings(self, infos):
+        #update performance metrics of current policies
+        if 'ranking' in infos:         
+            avgranking = infos['ranking'][0].cpu().numpy() #torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
+            update_ratio = infos['ranking'][1]
+            new_ratings = trueskill.rate(self.agentratings, avgranking)
+            for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
+                mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
+                sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
+                self.agentratings[it] = (trueskill.Rating(mu, sigma),)
 
     def update_ac_ratings(self, infos):
         pass
