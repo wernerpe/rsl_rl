@@ -49,6 +49,7 @@ class ActorCriticAttention(nn.Module):
                         critic_output_dim=1,
                         activation='elu',
                         init_noise_std=1.0,
+                        n_critics=1,
                         **kwargs):
         if kwargs:
             print("ActorCriticAttention.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
@@ -76,25 +77,41 @@ class ActorCriticAttention(nn.Module):
         )
 
         # Policy
-        self.actor = ActorAttention(
+        # self.actor = ActorAttention(
+        #   input_dim=mlp_input_dim_a, 
+        #   hidden_dims=actor_hidden_dims, 
+        #   output_dim=num_actions, 
+        #   activation=activation,
+        #   encoder=self.encoder,
+        # )
+        self.actor = ActorAttentionStddev(
           input_dim=mlp_input_dim_a, 
           hidden_dims=actor_hidden_dims, 
           output_dim=num_actions, 
           activation=activation,
           encoder=self.encoder,
+          init_std=init_noise_std,
         )
 
         # Value function
-        self.critic = CriticAttention(
+        # self.critic = CriticAttention(
+        #   input_dim=mlp_input_dim_c, 
+        #   hidden_dims=critic_hidden_dims, 
+        #   output_dims=critic_output_dim,
+        #   activation=activation,
+        #   encoder=self.encoder,
+        # )
+        self.critics = nn.ModuleList([CriticAttention(
           input_dim=mlp_input_dim_c, 
           hidden_dims=critic_hidden_dims, 
           output_dims=critic_output_dim,
           activation=activation,
           encoder=self.encoder,
-        )
+        ) for _ in range(n_critics)])
+        self.critics.to('cuda:0')
 
         print(f"Actor MLP: {self.actor}")
-        print(f"Critic MLP: {self.critic}")
+        print(f"Critic MLP: {self.critics[0]}")
 
         # Action noise
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
@@ -132,8 +149,11 @@ class ActorCriticAttention(nn.Module):
         return self.distribution.entropy().sum(dim=-1)
 
     def update_distribution(self, observations):
-        mean = self.actor(observations)
-        self.distribution = Normal(mean, mean*0. + self.std)
+        # mean = self.actor(observations)
+        # self.distribution = Normal(mean, mean*0. + self.std)
+
+        mean, std = self.actor(observations)
+        self.distribution = Normal(mean, std)
 
     def act(self, observations, **kwargs):
         self.update_distribution(observations)
@@ -152,12 +172,15 @@ class ActorCriticAttention(nn.Module):
 
 
     def act_inference(self, observations):
-        actions_mean = self.actor(observations)
+        # actions_mean = self.actor(observations)
+        actions_mean, _ = self.actor(observations)
         return actions_mean
 
     def evaluate(self, critic_observations, **kwargs):
-        value = self.critic(critic_observations)
-        return value
+        # value = self.critic(critic_observations)
+        # return value
+        values = [critic(critic_observations) for critic in self.critics]
+        return torch.stack(values, dim=1)
 
 
 class ActorAttention(nn.Module):
@@ -185,6 +208,42 @@ class ActorAttention(nn.Module):
         return self._network(latent)
 
 
+class ActorAttentionStddev(nn.Module):
+  
+    def __init__(self, input_dim, hidden_dims, output_dim, activation, encoder, init_std):
+
+        super(ActorAttentionStddev, self).__init__()
+
+        self._encoder = encoder
+
+        self.output_dim = output_dim
+        self.init_std = np.log(np.exp(init_std) - 1.)
+        self.min_std = 1e-2
+
+        actor_layers = []
+        actor_layers.append(nn.Linear(input_dim, hidden_dims[0]))
+        actor_layers.append(nn.LayerNorm(hidden_dims[0]))
+        actor_layers.append(nn.Tanh())
+        for l in range(len(hidden_dims)):
+            if l == len(hidden_dims) - 1:
+                actor_layers.append(nn.Linear(hidden_dims[l], 2*output_dim))
+            else:
+                actor_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
+                actor_layers.append(activation)
+        self._network = nn.Sequential(*actor_layers)
+
+    def forward(self, observations):
+        latent = self._encoder(observations)
+        # latent = observations
+        output = self._network(latent)
+
+        mean, std = torch.split(output, self.output_dim, dim=-1)
+        std = nn.functional.softplus(std + self.init_std) + self.min_std
+        # mean = 2.0 * nn.functional.tanh(mean / 2.0)
+
+        return mean, std
+
+
 class CriticAttention(nn.Module):
   
     def __init__(self, input_dim, hidden_dims, activation, encoder, output_dims=1):
@@ -207,6 +266,7 @@ class CriticAttention(nn.Module):
 
     def forward(self, observations):
         latent = self._encoder(observations)
+        # latent = observations
         return self._network(latent)
 
 

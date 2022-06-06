@@ -51,7 +51,7 @@ class MultiAgentRolloutStorage:
         def clear(self):
             self.__init__()
 
-    def __init__(self, num_envs, num_transitions_per_env, obs_shape, privileged_obs_shape, actions_shape, num_agents, device='cpu'):
+    def __init__(self, num_envs, num_transitions_per_env, obs_shape, privileged_obs_shape, actions_shape, num_agents, num_critics, device='cpu'):
 
         self.device = device
 
@@ -65,14 +65,17 @@ class MultiAgentRolloutStorage:
             self.privileged_observations = torch.zeros(num_transitions_per_env, num_envs, *privileged_obs_shape, device=self.device)
         else:
             self.privileged_observations = None
-        self.rewards = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
+        # self.rewards = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
+        self.rewards = torch.zeros(num_transitions_per_env, num_envs, num_critics, 1, device=self.device)
         self.actions = torch.zeros(num_transitions_per_env, num_envs, *actions_shape, device=self.device)
         self.dones = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device).byte()
 
         # For PPO
         self.actions_log_prob = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
-        self.values = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
-        self.returns = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
+        # self.values = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
+        # self.returns = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
+        self.values = torch.zeros(num_transitions_per_env, num_envs, num_critics, 1, device=self.device)
+        self.returns = torch.zeros(num_transitions_per_env, num_envs, num_critics, 1, device=self.device)
         self.advantages = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
         self.mu = torch.zeros(num_transitions_per_env, num_envs, *actions_shape, device=self.device)
         self.sigma = torch.zeros(num_transitions_per_env, num_envs, *actions_shape, device=self.device)
@@ -95,7 +98,8 @@ class MultiAgentRolloutStorage:
         self.observations[self.step].copy_(transition.observations)
         if self.privileged_observations is not None: self.privileged_observations[self.step].copy_(transition.critic_observations)
         self.actions[self.step].copy_(transition.actions)
-        self.rewards[self.step].copy_(transition.rewards.view(-1, 1))
+        # self.rewards[self.step].copy_(transition.rewards.view(-1, 1))
+        self.rewards[self.step].copy_(transition.rewards)
         self.dones[self.step].copy_(transition.dones.view(-1, 1))
         self.values[self.step].copy_(transition.values)
         self.actions_log_prob[self.step].copy_(transition.actions_log_prob.view(-1, 1))
@@ -139,12 +143,15 @@ class MultiAgentRolloutStorage:
             else:
                 next_values = self.values[step + 1]
             next_is_not_terminal = 1.0 - self.dones[step].float()
-            delta = self.rewards[step] + next_is_not_terminal * gamma * next_values - self.values[step]
-            advantage = delta + next_is_not_terminal * gamma * lam * advantage
+            # delta = self.rewards[step] + next_is_not_terminal * gamma * next_values - self.values[step]
+            delta = self.rewards[step] + next_is_not_terminal.unsqueeze(1) * gamma * next_values - self.values[step]
+            # advantage = delta + next_is_not_terminal * gamma * lam * advantage
+            advantage = delta + next_is_not_terminal.unsqueeze(1) * gamma * lam * advantage
             self.returns[step] = advantage + self.values[step]
 
         # Compute and normalize the advantages
         self.advantages = self.returns - self.values
+        self.advantages = self.advantages.mean(dim=2) - 0.5 * self.advantages.std(dim=2)
         self.advantages = (self.advantages - self.advantages.mean()) / (self.advantages.std() + 1e-8)
 
     def get_statistics(self):

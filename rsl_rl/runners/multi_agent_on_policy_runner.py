@@ -120,17 +120,22 @@
 #         cur_mean_team_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 #         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
-#         tot_iter = self.current_learning_iteration + num_learning_iterations
-#         for it in range(self.current_learning_iteration, tot_iter):
-#             start = time.time()
-#             # Rollout
-#             with torch.inference_mode():
-#                 for i in range(self.num_steps_per_env):
-#                     actions = self.alg.act(obs, critic_obs)
-#                     obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
-#                     critic_obs = privileged_obs if privileged_obs is not None else obs
-#                     obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
-#                     self.alg.process_env_step(rewards, dones, infos)
+        tot_iter = self.current_learning_iteration + num_learning_iterations
+        for it in range(self.current_learning_iteration, tot_iter):
+            start = time.time()
+            # Rollout
+            with torch.inference_mode():
+                for i in range(self.num_steps_per_env):
+                    actions = self.alg.act(obs, critic_obs)
+                                        
+                    # self.env.viewer.update_values(self.alg.transition.values)
+                    self.env.viewer.update_values(self.alg.values_separate)
+                    self.env.viewer.update_ranks(self.env.ranks)
+
+                    obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
+                    critic_obs = privileged_obs if privileged_obs is not None else obs
+                    obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
+                    self.alg.process_env_step(rewards, dones, infos)
                     
 #                     if self.log_dir is not None:
 #                         # Book keeping
@@ -152,9 +157,11 @@
 #                 stop = time.time()
 #                 collection_time = stop - start
 
-#                 # Learning step
-#                 start = stop
-#                 self.alg.compute_returns(critic_obs)
+                # self.env.viewer.save_uncertain_imgs()
+
+                # Learning step
+                start = stop
+                self.alg.compute_returns(critic_obs)
             
 #             mean_value_loss, mean_surrogate_loss, aux_info_loss = self.alg.update()
 #             if  it % self.population_update_interval == 0:
@@ -192,24 +199,38 @@
 #         mean_std = self.alg.actor_critic.std.mean()
 #         fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
 
-#         self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
-#         self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
-#         if locs['aux_info_loss']:
-#             for key, value in locs['aux_info_loss'].items():
-#                 self.writer.add_scalar('Loss/'+key, value, locs['it'])
+        ego_action_mean_per_dim = self.alg.actor_critic.ego_action_mean.mean(dim=0)
+        ego_action_std_per_dim = self.alg.actor_critic.ego_action_std.mean(dim=0)
+        ego_action_mean_magnitude_per_dim = self.alg.actor_critic.ego_action_mean.abs().mean(dim=0)
+
+        self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
+        self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
+        if locs['aux_info_loss']:
+            for key, value in locs['aux_info_loss'].items():
+                self.writer.add_scalar('Loss/'+key, value, locs['it'])
                 
-#         self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
-#         self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
-#         self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
-#         self.writer.add_scalar('Perf/collection time', locs['collection_time'], locs['it'])
-#         self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
-#         #self.writer.add_scalar('Agent/Trueskill', self.alg.actor_critic.agentratings[0][0].mu, locs['it'])
+        self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
+        self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
+        self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
+        self.writer.add_scalar('Perf/collection time', locs['collection_time'], locs['it'])
+        self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
+        #self.writer.add_scalar('Agent/Trueskill', self.alg.actor_critic.agentratings[0][0].mu, locs['it'])
+
+        for action_id, (action_mean, action_std, action_mag_mean) in enumerate(zip(ego_action_mean_per_dim, ego_action_std_per_dim, ego_action_mean_magnitude_per_dim)):
+            self.writer.add_scalar('Policy/ego_action_mean' + str(action_id), action_mean.item(), locs['it'])
+            self.writer.add_scalar('Policy/ego_action_std' + str(action_id), action_std.item(), locs['it'])
+            self.writer.add_scalar('Policy/ego_action_magnitude_mean' + str(action_id), action_mag_mean.item(), locs['it'])
         
-#         if len(locs['rewbuffer']) > 0:
-#             self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
-#             self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
-#             self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
-#             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
+        if len(locs['rewbuffer']) > 0:
+            self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
+            self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
+            self.writer.add_scalar('Train/min_episode_length', min(locs['lenbuffer']), locs['it'])
+            self.writer.add_scalar('Train/max_episode_length', max(locs['lenbuffer']), locs['it'])
+            self.writer.add_scalar('Train/episode_1step_freq', locs['lenbuffer'].count(1.0)/len(locs['lenbuffer']), locs['it'])
+            # self.writer.add_scalar('Train/min_episode_length_env', min(locs['lenbuffer2']), locs['it'])
+            # self.writer.add_scalar('Train/max_episode_length_env', max(locs['lenbuffer2']), locs['it'])
 
 #         if len(locs['trewbuffer']) > 0:
 #             self.writer.add_scalar('Train/mean_team_reward', statistics.mean(locs['trewbuffer']), locs['it'])
@@ -218,33 +239,33 @@
 #             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
 
 
-#         str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
+        string = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
 
-#         if len(locs['rewbuffer']) > 0:
-#             log_string = (f"""{'#' * width}\n"""
-#                           f"""{str.center(width, ' ')}\n\n"""
-#                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
-#                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
-#                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
-#                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-#                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
-#                           f"""{'Mean total reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
-#                           f"""{'Mean team reward:':>{pad}} {statistics.mean(locs['trewbuffer']):.2f}\n"""
-#                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
-#                         #  f"""{'Current Trueskill Agent:':>{pad}} {self.alg.actor_critic.agentratings[0][0].mu:.2f}\n""")
+        if len(locs['rewbuffer']) > 0:
+            log_string = (f"""{'#' * width}\n"""
+                          f"""{string.center(width, ' ')}\n\n"""
+                          f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
+                            'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
+                          f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
+                          f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+                          f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
+                          f"""{'Mean total reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
+                          f"""{'Mean team reward:':>{pad}} {statistics.mean(locs['trewbuffer']):.2f}\n"""
+                          f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
+                        #  f"""{'Current Trueskill Agent:':>{pad}} {self.alg.actor_critic.agentratings[0][0].mu:.2f}\n""")
                         
-#                         #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
-#                         #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
-#         else:
-#             log_string = (f"""{'#' * width}\n"""
-#                           f"""{str.center(width, ' ')}\n\n"""
-#                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
-#                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
-#                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
-#                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-#                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
-#                         #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
-#                         #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
+                        #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
+                        #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
+        else:
+            log_string = (f"""{'#' * width}\n"""
+                          f"""{string.center(width, ' ')}\n\n"""
+                          f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
+                            'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
+                          f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
+                          f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+                          f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
+                        #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
+                        #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
 
 #         log_string += ep_string
 #         log_string += (f"""{'-' * width}\n"""

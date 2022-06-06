@@ -5,6 +5,7 @@ import torch.optim as optim
 
 from rsl_rl.modules import CMAActorCritic, MultiTeamCMAAC 
 from rsl_rl.storage import CentralizedMultiAgentRolloutStorage
+import trueskill
 
 #only track transitions of agent 1, agent 2 blindly runs old version of policy 
 #which gets exchanged periodically for the current version
@@ -53,8 +54,12 @@ class JRMAPPO:
         self.max_grad_norm = max_grad_norm
         self.use_clipped_value_loss = use_clipped_value_loss
 
+        self.n_critics = self.actor_critic.n_critics
+
+        self.value_selector = torch.distributions.Categorical(probs=0.5*torch.ones((2,)).to(self.device))
+
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents):
-        self.storage = CentralizedMultiAgentRolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents, self.device)
+        self.storage = CentralizedMultiAgentRolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents, self.n_critics, self.device)
 
     def test_mode(self):
         self.actor_critic.test()
@@ -70,6 +75,7 @@ class JRMAPPO:
         all_agent_actions =  self.actor_critic.act(obs).detach()
         self.transition.actions = all_agent_actions[:, self.actor_critic.teams[0], :]
         self.transition.values = self.actor_critic.evaluate(critic_obs[:, self.actor_critic.teams[0], :]).detach()
+        self.values_separate = torch.concat([self.actor_critic.evaluate(critic_obs[:, agent_id, :].unsqueeze(1)).detach() for agent_id in self.actor_critic.teams[0]], dim=-2)
         #only record log prob of actions from net to train
         lp, m, s, e = self.actor_critic.update_distribution_and_get_actions_log_prob_mu_sigma_entropy(obs[:, self.actor_critic.teams[0], :], self.transition.actions)
         
@@ -82,13 +88,13 @@ class JRMAPPO:
         return all_agent_actions
 
     def process_env_step(self, rewards, dones, infos):
-        self.transition.rewards = rewards[:, self.actor_critic.teams[0], :].clone()
+        self.transition.rewards = rewards[:, self.actor_critic.teams[0], :].clone().unsqueeze(dim=1).repeat(1, self.n_critics, 1, 1)
         self.transition.dones = dones
         if 'agent_active' in infos:
           self.transition.active_agents = 1.0 * infos['agent_active']
         # Bootstrapping on time outs
         if 'time_outs' in infos:
-            self.transition.rewards += self.gamma * self.transition.values * infos['time_outs'].unsqueeze(1).unsqueeze(1).to(self.device)
+            self.transition.rewards += self.gamma * self.transition.values * infos['time_outs'].unsqueeze(1).unsqueeze(1).unsqueeze(1).to(self.device)
 
         # Record the transition
         self.storage.add_transitions(self.transition)
@@ -150,18 +156,31 @@ class JRMAPPO:
 
                 # Value function loss
                 if self.use_clipped_value_loss:
-                    value_individual_clipped = target_values_individual_batch + (value_batch[:,:,0] - target_values_individual_batch).clamp(-self.clip_param,
+                    # value_individual_clipped = target_values_individual_batch + (value_batch[:,:,0] - target_values_individual_batch).clamp(-self.clip_param,
+                    #                                                                                 self.clip_param)
+                    # value_losses_individual = (value_batch[:,:,0] - returns_individual_batch).pow(2)
+                    # value_losses_individual_clipped = (value_individual_clipped - returns_individual_batch).pow(2)
+                    # value_loss_individual = torch.max(value_losses_individual, value_losses_individual_clipped).mean()
+
+                    # #since both entries the same pick team entry for agent 0 by convention
+                    # value_team_clipped = target_values_team_batch[:,0] + (value_batch[:,0,1] - target_values_team_batch[:,0]).clamp(-self.clip_param,
+                    #                                                                                 self.clip_param)
+                    # value_losses_team = (value_batch[:,0,1] - returns_team_batch[:,0]).pow(2)
+                    # value_losses_team_clipped = (value_team_clipped - returns_team_batch[:,0]).pow(2)
+                    # value_loss_team = torch.max(value_losses_team, value_losses_team_clipped).mean()
+
+                    value_individual_clipped = target_values_individual_batch + (value_batch[..., 0] - target_values_individual_batch).clamp(-self.clip_param,
                                                                                                     self.clip_param)
-                    value_losses_individual = (value_batch[:,:,0] - returns_individual_batch).pow(2)
+                    value_losses_individual = (value_batch[..., 0] - returns_individual_batch).pow(2)
                     value_losses_individual_clipped = (value_individual_clipped - returns_individual_batch).pow(2)
-                    value_loss_individual = torch.max(value_losses_individual, value_losses_individual_clipped).mean()
+                    value_loss_individual = torch.max(value_losses_individual, value_losses_individual_clipped).mean((0, -1))
 
                     #since both entries the same pick team entry for agent 0 by convention
-                    value_team_clipped = target_values_team_batch[:,0] + (value_batch[:,0,1] - target_values_team_batch[:,0]).clamp(-self.clip_param,
+                    value_team_clipped = target_values_team_batch[..., 0] + (value_batch[..., 0, 1] - target_values_team_batch[..., 0]).clamp(-self.clip_param,
                                                                                                     self.clip_param)
-                    value_losses_team = (value_batch[:,0,1] - returns_team_batch[:,0]).pow(2)
-                    value_losses_team_clipped = (value_team_clipped - returns_team_batch[:,0]).pow(2)
-                    value_loss_team = torch.max(value_losses_team, value_losses_team_clipped).mean()
+                    value_losses_team = (value_batch[..., 0, 1] - returns_team_batch[..., 0]).pow(2)
+                    value_losses_team_clipped = (value_team_clipped - returns_team_batch[..., 0]).pow(2)
+                    value_loss_team = torch.max(value_losses_team, value_losses_team_clipped).mean(dim=0)
  
 
                 else: 
@@ -169,7 +188,8 @@ class JRMAPPO:
                     #since both entries the same pick team entry for agent 0 by convention
                     value_loss_team = (returns_team_batch[:,0] - value_batch[:,0,1]).pow(2).mean()
 
-                loss = surrogate_loss + self.value_loss_coef * (value_loss_team + value_loss_individual)  - self.entropy_coef * entropy_batch.mean()
+                value_selectors = self.value_selector.sample((self.n_critics,))
+                loss = surrogate_loss + self.value_loss_coef * (value_selectors * (value_loss_team + value_loss_individual)).mean()  - self.entropy_coef * entropy_batch.mean()
 
                 # Gradient step
                 self.optimizer.zero_grad()
@@ -177,7 +197,7 @@ class JRMAPPO:
                 nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
-                mean_value_loss += value_loss_team.item() + value_loss_individual.item() 
+                mean_value_loss += value_loss_team.mean().item() + value_loss_individual.mean().item() 
                 mean_surrogate_loss += surrogate_loss.item()
                 mean_joint_ratio_values += ratio.mean().item()
                 mean_advantage_values += advantages_batch.mean().item()
@@ -204,3 +224,21 @@ class JRMAPPO:
 
     def update_population(self,):
         self.actor_critic.redraw_ac_networks()
+
+    def update_ratings(self, eval_ranks, eval_ep_duration, max_ep_len):
+        eval_team_ranks = eval_ranks.clone()
+
+        for team in self.actor_critic.teams:
+            eval_team_ranks[:, team] = torch.min(eval_ranks[:, team], dim = 1)[0].reshape(-1,1)
+        # eval_team_ranks = (eval_team_ranks==0).type(torch.float)  # FIXME: this only works for 2 teams
+
+        ratings = self.actor_critic.get_ratings()
+        for ranks, dur in zip(eval_team_ranks, eval_ep_duration):
+            new_ratings = trueskill.rate(ratings, ranks.cpu().numpy())
+            update_ratio = 1.0*dur.item()/max_ep_len
+            for it, (old, new) in enumerate(zip(ratings, new_ratings)):
+                mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
+                sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
+                ratings[it] = (trueskill.Rating(mu, sigma),)
+        self.actor_critic.set_ratings(ratings)
+        return ratings
