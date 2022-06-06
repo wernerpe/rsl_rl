@@ -165,6 +165,7 @@ class MAOnPolicyRunner:
             mean_value_loss, mean_surrogate_loss, aux_info_loss = self.alg.update()
             if  it % self.population_update_interval == 0:
                 self.alg.update_population()
+
             stop = time.time()
             learn_time = stop - start
             if self.log_dir is not None:
@@ -189,19 +190,21 @@ class MAOnPolicyRunner:
         eval_ep_rewards_team = 0.*already_done
         eval_ep_duration = 0.*already_done
         eval_ep_terminal_ranks = 0.*self.env.ranks
-
+            
         self.alg.actor_critic.eval()
         policy = self.alg.actor_critic.act_inference
         for ev_it in range(self.env.max_episode_length+1):
             actions = policy(obs)
             obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
             
-            eval_ep_duration += ev_it*dones
+            eval_ep_duration += ev_it*dones*(~already_done)
             eval_ep_terminal_ranks += self.env.ranks[:, :] * (~already_done)*dones
             eval_ep_rewards_tot += torch.sum(rewards[:,0,:], dim = 1).view(-1,1)*(~already_done)
             eval_ep_rewards_team += (rewards[:,0,1]).view(-1,1)*(~already_done)
             
             already_done |= dones
+            if ~torch.any(~already_done):
+                break
         
         ratings = self.alg.update_ratings(eval_ep_terminal_ranks, eval_ep_duration, self.env.max_episode_length)
         mean_ep_duration = torch.mean(eval_ep_duration).item()

@@ -1,3 +1,4 @@
+from turtle import update
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -98,14 +99,14 @@ class IMAPPO:
 
     def update_ratings(self, eval_ranks, eval_ep_duration, max_ep_len):
         ratings = self.actor_critic.get_ratings()
-        for ranks, dur in zip(eval_ranks, eval_ep_duration):
-            new_ratings = trueskill.rate(ratings, ranks.cpu().numpy())
-            update_ratio = 1.0*dur.item()/max_ep_len
-            for it, (old, new) in enumerate(zip(ratings, new_ratings)):
-                mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
-                sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
-                ratings[it] = (trueskill.Rating(mu, sigma),)
-        self.actor_critic.set_ratings(ratings)
+        update_ratio = (torch.mean(eval_ep_duration)/max_ep_len).item()
+        mean_ranks = torch.mean(eval_ranks, dim = 0)
+        new_ratings = trueskill.rate(ratings, mean_ranks.cpu().numpy())
+        for it, (old, new) in enumerate(zip(ratings, new_ratings)):
+            mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
+            sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
+            ratings[it] = (trueskill.Rating(mu, sigma),)
+        self.actor_critic.set_ratings(ratings)    
         return ratings
         
 
@@ -195,4 +196,13 @@ class IMAPPO:
         return mean_value_loss, mean_surrogate_loss, {'mean_ratio_val': mean_ratio_val, 'mean_advantage_val': mean_advantage_val, 'mean_jr_num': mean_jr_num, 'mean_jr_den' : mean_jr_den}
 
     def update_population(self,):
-        self.actor_critic.redraw_ac_networks()
+        if self.actor_critic.is_recurrent:
+            generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        elif self.actor_critic.is_attentive:
+          generator = self.storage.attention_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        else:
+            generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        batch = next(generator)
+        obs_batch = batch[0]
+
+        self.actor_critic.redraw_ac_networks_KL_divergence(obs_batch)

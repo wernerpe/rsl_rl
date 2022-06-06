@@ -6,6 +6,7 @@ import copy
 from rsl_rl.modules import ActorCritic, ActorCriticAttention#, ActorAttention, CriticAttention
 import trueskill
 
+
 class MAActorCritic():
     def __init__(self,  
                         num_actor_obs,
@@ -167,26 +168,47 @@ class MAActorCritic():
 
     def update_ac_ratings(self, infos):
         #update performance metrics of current policies
-        if 'ranking' in infos:         
-            avgranking = infos['ranking'][0].cpu().numpy() #torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
-            update_ratio = infos['ranking'][1]
-            new_ratings = trueskill.rate(self.agentratings, avgranking)
-            for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
-                mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
-                sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
-                self.agentratings[it] = (trueskill.Rating(mu, sigma),)
+        
+        pass
+        # if 'ranking' in infos:         
+        #     avgranking = infos['ranking'][0].cpu().numpy() #torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
+        #     update_ratio = infos['ranking'][1]
+        #     new_ratings = trueskill.rate(self.agentratings, avgranking)
+        #     for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
+        #         mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
+        #         sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
+        #         self.agentratings[it] = (trueskill.Rating(mu, sigma),)
 
-    def redraw_ac_networks(self):
+    def redraw_ac_networks_KL_divergence(self, obs_batch):
+        current_ado_models = self.opponent_acs.copy()
+        kl_divs = []
+        self.ac1.update_distribution(obs_batch)
+        dist_ego = self.ac1.distribution
+        for ado_dict in self.past_models:
+            self.opponent_acs[0].load_state_dict(ado_dict)
+            self.opponent_acs[0].update_distribution(obs_batch)
+            dist_ado = self.opponent_acs[0].distribution
+            kl_divs.append(torch.mean(torch.sum(torch.distributions.kl_divergence(dist_ado, dist_ego), dim = 1)).item())       
+        self.opponent_acs = current_ado_models
+        print('[MAAC POPULATION UPDATE] KLs', kl_divs)
+
+        if np.min(kl_divs)>0.05:
+            self.redraw_ac_networks(save = True)
+        else:
+            self.redraw_ac_networks(save = False)
+
+    def redraw_ac_networks(self, save):
         #update population of competing agents, here simply load 
         #old version of agent 1 into ac2 slot
-        self.past_models.append(self.ac1.state_dict())
-        self.past_ratings_mu.append(self.agentratings[0][0].mu)
-        self.past_ratings_sigma.append(self.agentratings[0][0].sigma)
-        if len(self.past_models)> self.max_num_models:
-            idx_del = np.random.randint(0, self.max_num_models-2)
-            del self.past_models[idx_del]
-            del self.past_ratings_mu[idx_del]
-            del self.past_ratings_sigma[idx_del]
+        if save:
+            self.past_models.append(copy.deepcopy(self.ac1.state_dict()))
+            self.past_ratings_mu.append(self.agentratings[0][0].mu)
+            self.past_ratings_sigma.append(self.agentratings[0][0].sigma)
+            if len(self.past_models)> self.max_num_models:
+                idx_del = np.random.randint(0, self.max_num_models-2)
+                del self.past_models[idx_del]
+                del self.past_ratings_mu[idx_del]
+                del self.past_ratings_sigma[idx_del]
 
         #select model to load
         #renormalize dist
@@ -206,8 +228,8 @@ class MAActorCritic():
             rating = (trueskill.Rating(mu = mu, sigma = sigma ),) 
             self.agentratings[op_id+1] = rating
 
-        rating_train_pol = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = self.agentratings[0][0].sigma),)
-        self.agentratings[0] = rating_train_pol 
+        #rating_train_pol = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = self.agentratings[0][0].sigma),)
+        #self.agentratings[0] = rating_train_pol 
         
     def new_rating(self, mu, sigma):
         return (trueskill.Rating(mu = mu, sigma = sigma ),) 
