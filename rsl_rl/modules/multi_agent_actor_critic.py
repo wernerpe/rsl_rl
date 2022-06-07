@@ -31,6 +31,7 @@ class MAActorCritic():
         self.is_attentive = kwargs['attentive']
         self.num_teams = kwargs['numteams']
         self.team_size = kwargs['teamsize']
+        self.kl_save_threshold = kwargs['kl_save_threshold']
         self.teams = [torch.tensor([idx for idx in range(self.team_size*start, self.team_size*start+self.team_size)], dtype=torch.long) for start in range(self.num_teams)]
 
         if self.is_attentive:
@@ -64,8 +65,8 @@ class MAActorCritic():
 
         self.max_num_models = kwargs['max_num_old_models']
         self.draw_probs_unnorm = np.ones((self.max_num_models,))
-        self.draw_probs_unnorm[0:-3] = 0.4/(self.max_num_models-3)
-        self.draw_probs_unnorm[-3:] = 0.6/3
+        self.draw_probs_unnorm[0:-3] = 0.6/(self.max_num_models-3)
+        self.draw_probs_unnorm[-3:] = 0.4/3
 
         self.past_models = [self.ac1.state_dict()]
         self.past_ratings_mu = [0]
@@ -192,7 +193,7 @@ class MAActorCritic():
         self.opponent_acs = current_ado_models
         print('[MAAC POPULATION UPDATE] KLs', kl_divs)
 
-        if np.min(kl_divs)>0.05:
+        if np.min(kl_divs)>self.kl_save_threshold:
             self.redraw_ac_networks(save = True)
         else:
             self.redraw_ac_networks(save = False)

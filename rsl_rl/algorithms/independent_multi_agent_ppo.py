@@ -98,16 +98,34 @@ class IMAPPO:
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
     def update_ratings(self, eval_ranks, eval_ep_duration, max_ep_len):
+        # ratings = self.actor_critic.get_ratings()
+        # update_ratio = (torch.mean(eval_ep_duration)/max_ep_len).item()
+        # mean_ranks = torch.mean(eval_ranks, dim = 0)
+        # new_ratings = trueskill.rate(ratings, mean_ranks.cpu().numpy())
+
+        # for it, (old, new) in enumerate(zip(ratings, new_ratings)):
+        #     mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
+        #     sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
+        #     ratings[it] = (trueskill.Rating(mu, sigma),)
+        # self.actor_critic.set_ratings(ratings)    
+        
+        # return ratings
+
         ratings = self.actor_critic.get_ratings()
-        update_ratio = (torch.mean(eval_ep_duration)/max_ep_len).item()
-        mean_ranks = torch.mean(eval_ranks, dim = 0)
-        new_ratings = trueskill.rate(ratings, mean_ranks.cpu().numpy())
-        for it, (old, new) in enumerate(zip(ratings, new_ratings)):
-            mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
-            sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
-            ratings[it] = (trueskill.Rating(mu, sigma),)
+        
+        for ranks, dur in zip(eval_ranks, eval_ep_duration):
+
+            update_ratio = (dur/max_ep_len).item()
+            mean_ranks = ranks
+            new_ratings = trueskill.rate(ratings, mean_ranks.cpu().numpy())
+
+            for it, (old, new) in enumerate(zip(ratings, new_ratings)):
+                mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
+                sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
+                ratings[it] = (trueskill.Rating(mu, sigma),)
         self.actor_critic.set_ratings(ratings)    
         return ratings
+        
         
 
     def update(self):
