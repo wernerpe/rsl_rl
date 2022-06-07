@@ -178,17 +178,7 @@ class MAActorCritic():
         self.agentratings = ratings
 
     def update_ac_ratings(self, infos):
-        #update performance metrics of current policies
-        
         pass
-        # if 'ranking' in infos:         
-        #     avgranking = infos['ranking'][0].cpu().numpy() #torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
-        #     update_ratio = infos['ranking'][1]
-        #     new_ratings = trueskill.rate(self.agentratings, avgranking)
-        #     for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
-        #         mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
-        #         sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
-        #         self.agentratings[it] = (trueskill.Rating(mu, sigma),)
 
     def redraw_ac_networks_KL_divergence(self, obs_batch):
         current_ado_models = self.opponent_acs.copy()

@@ -134,7 +134,8 @@ class MAOnPolicyRunner:
                 for i in range(self.num_steps_per_env):
                     actions = self.alg.act(obs, critic_obs)
 
-                    self.env.viewer.update_values(self.alg.values_separate)
+                    if self.cfg["algorithm_class_name"] == 'JRMAPPO':
+                        self.env.viewer.update_values(self.alg.values_separate)
                     self.env.viewer.update_ranks(self.env.ranks)
 
                     # obs, privileged_obs, rewards, dones, infos = self.env.step(actions)

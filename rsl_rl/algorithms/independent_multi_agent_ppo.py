@@ -55,6 +55,8 @@ class IMAPPO:
 
         self.n_critics = self.actor_critic.n_critics
 
+        self._value_stdv_run_mean = 0.0
+        self._value_stdv_run_stdv = 0.0
         self.value_selector = torch.distributions.Categorical(probs=0.5*torch.ones((2,)).to(self.device))
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents):
@@ -74,6 +76,14 @@ class IMAPPO:
         all_agent_actions =  self.actor_critic.act(obs).detach()
         self.transition.actions = all_agent_actions[:, 0, :]
         self.transition.values = self.actor_critic.evaluate(critic_obs[:, 0, :]).detach()
+        self.values_separate = self.transition.values
+        
+        # Compute statistics of value std to identify uncertain states
+        value_stdv_cur = self.values_separate[:,:,0].std(dim=-1)
+        self._value_stdv_run_mean = 0.7 * self._value_stdv_run_mean + 0.3 * value_stdv_cur.mean()
+        self._value_stdv_run_stdv = 0.7 * self._value_stdv_run_stdv + 0.3 * value_stdv_cur.std()
+        self.value_std_cur_norm = value_stdv_cur / (self._value_stdv_run_mean + self._value_stdv_run_stdv)
+
         #only record log prob of actions from net to train
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()
