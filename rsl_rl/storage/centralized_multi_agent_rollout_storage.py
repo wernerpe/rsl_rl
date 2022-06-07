@@ -145,7 +145,7 @@ class CentralizedMultiAgentRolloutStorage:
 
         # Compute and normalize the advantages
         self.advantages = torch.sum(self.returns - self.values, dim = (-2,-1))  # NOTE: check whether double sum good
-        self.advantages = self.advantages.mean(dim=2) - 0.5 * self.advantages.std(dim=2)
+        self.advantages = self.advantages.mean(dim=2) #- 0.5 * self.advantages.std(dim=2)
         self.advantages = (self.advantages - self.advantages.mean()) / (self.advantages.std() + 1e-8)
 
     def get_statistics(self):

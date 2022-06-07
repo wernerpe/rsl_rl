@@ -137,7 +137,8 @@ class MAOnPolicyRunner:
                     self.env.viewer.update_values(self.alg.values_separate)
                     self.env.viewer.update_ranks(self.env.ranks)
 
-                    obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
+                    # obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
+                    obs, privileged_obs, rewards, dones, infos = self.env.step_with_importance_sampling_check(actions, self.alg.value_std_cur_norm)
                     critic_obs = privileged_obs if privileged_obs is not None else obs
                     obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
                     self.alg.process_env_step(rewards, dones, infos)

@@ -56,6 +56,9 @@ class JRMAPPO:
 
         self.n_critics = self.actor_critic.n_critics
 
+        self._value_stdv_run_mean = 0.0
+        self._value_stdv_run_stdv = 0.0
+
         self.value_selector = torch.distributions.Categorical(probs=0.5*torch.ones((2,)).to(self.device))
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents):
@@ -76,6 +79,13 @@ class JRMAPPO:
         self.transition.actions = all_agent_actions[:, self.actor_critic.teams[0], :]
         self.transition.values = self.actor_critic.evaluate(critic_obs[:, self.actor_critic.teams[0], :]).detach()
         self.values_separate = torch.concat([self.actor_critic.evaluate(critic_obs[:, agent_id, :].unsqueeze(1)).detach() for agent_id in self.actor_critic.teams[0]], dim=-2)
+        
+        # Compute statistics of value std to identify uncertain states
+        value_stdv_cur = self.values_separate.sum((-1, -2)).std(dim=-1)
+        self._value_stdv_run_mean = 0.7 * self._value_stdv_run_mean + 0.3 * value_stdv_cur.mean()
+        self._value_stdv_run_stdv = 0.7 * self._value_stdv_run_stdv + 0.3 * value_stdv_cur.std()
+        self.value_std_cur_norm = value_stdv_cur / (self._value_stdv_run_mean + self._value_stdv_run_stdv)
+
         #only record log prob of actions from net to train
         lp, m, s, e = self.actor_critic.update_distribution_and_get_actions_log_prob_mu_sigma_entropy(obs[:, self.actor_critic.teams[0], :], self.transition.actions)
         

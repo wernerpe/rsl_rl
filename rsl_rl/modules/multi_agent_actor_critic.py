@@ -398,7 +398,7 @@ class MultiTeamCMAAC(nn.Module):
 
         #update population of competing agents, here simply load 
         #old version of agent 1 into ac2 slot
-        self.past_models.append(teamac1.state_dict())
+        self.past_models.append(copy.deepcopy(teamac1.state_dict()))
         # self.past_ratings_mu.append(self.agentratings[0][0].mu)
         # self.past_ratings_sigma.append(self.agentratings[0][0].sigma)
         if len(self.past_models) > self.max_num_models:
