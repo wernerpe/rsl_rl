@@ -233,13 +233,23 @@ class JRMAPPO:
                                                       'mean_mu0': mean_mu0_batch}
 
     def update_population(self,):
-        self.actor_critic.redraw_ac_networks()
+        # self.actor_critic.redraw_ac_networks()
+        if self.actor_critic.is_recurrent:
+            generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        elif self.actor_critic.is_attentive:
+          generator = self.storage.attention_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        else:
+            generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        batch = next(generator)
+        obs_batch = batch[0]
+
+        self.actor_critic.redraw_ac_networks_KL_divergence(obs_batch)
 
     def update_ratings(self, eval_ranks, eval_ep_duration, max_ep_len):
-        eval_team_ranks = eval_ranks.clone()
+        eval_team_ranks = -100. * torch.ones_like(eval_ranks[..., :len(self.actor_critic.teams)])
 
-        for team in self.actor_critic.teams:
-            eval_team_ranks[:, team] = torch.min(eval_ranks[:, team], dim = 1)[0].reshape(-1,1)
+        for idx, team in enumerate(self.actor_critic.teams):
+            eval_team_ranks[:, idx] = torch.min(eval_ranks[:, team], dim = 1)[0]  # .reshape(-1,1)
         # eval_team_ranks = (eval_team_ranks==0).type(torch.float)  # FIXME: this only works for 2 teams
 
         ratings = self.actor_critic.get_ratings()

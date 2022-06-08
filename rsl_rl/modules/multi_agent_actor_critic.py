@@ -270,20 +270,28 @@ class MultiTeamCMAAC(nn.Module):
                                        num_critic_obs,
                                        num_actions,
                                        num_agents, 
-                                       actor_hidden_dims=[256, 256, 256],
-                                       critic_hidden_dims=[256, 256, 256],
+                                       actor_hidden_dims=actor_hidden_dims,
+                                       critic_hidden_dims=critic_hidden_dims,
                                        critic_output_dim=2,
                                        activation='elu',
-                                       init_noise_std=1.0,
+                                       init_noise_std=init_noise_std,
                                        n_critics=self.n_critics,
                                        **kwargs) for _ in range(self.num_teams)]
 
-        self.max_num_models = 40
+        self.agentratings = []
+        for idx in range(self.num_teams):
+            self.agentratings.append((trueskill.Rating(mu=0),))
+
+        self.is_recurrent = False
+
+        self.max_num_models = kwargs['max_num_old_models']
         self.draw_probs_unnorm = np.ones((self.max_num_models,))
-        self.draw_probs_unnorm[0:-5] = 0.7/(self.max_num_models-3)
-        self.draw_probs_unnorm[-5:] = 0.3/5
+        self.draw_probs_unnorm[0:-3] = 0.4/(self.max_num_models-3)
+        self.draw_probs_unnorm[-3:] = 0.6/3
 
         self.past_models = [self.teamacs[0].state_dict()]
+        self.past_ratings_mu = [0]
+        self.past_ratings_sigma = [self.agentratings[0][0].sigma]
 
     def reset(self, dones=None):
         pass
@@ -374,50 +382,79 @@ class MultiTeamCMAAC(nn.Module):
         return value
 
     def get_ratings(self,):
-        return self.teamacs[0].get_ratings()
+        return self.agentratings
 
     def set_ratings(self, ratings):
-        self.teamacs[0].set_ratings(ratings)
+        self.agentratings = ratings
 
     def update_ac_ratings(self, infos):
-        self.teamacs[0].update_ac_ratings(infos)
+        #update performance metrics of current policies
+        if 'ranking' in infos:         
+            avgranking = [np.min(infos['ranking'][0][ids].cpu().numpy()) for ids in self.teams] #torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
+            update_ratio = infos['ranking'][1]
+            new_ratings = trueskill.rate(self.agentratings, avgranking)
+            for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
+                mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
+                sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
+                self.agentratings[it] = (trueskill.Rating(mu, sigma),)
 
-    def redraw_ac_networks(self):
+    def new_rating(self, mu, sigma):
+        return (trueskill.Rating(mu = mu, sigma = sigma ),) 
 
-        teamac1 = self.teamacs[0]
+    def redraw_ac_networks_KL_divergence(self, obs_batch):
+        current_models = self.teamacs.copy()
+        kl_divs = []
+        self.teamacs[0].ac.update_distribution(obs_batch)
+        dist_ego = self.teamacs[0].ac.distribution
+        for ado_dict in self.past_models:
+            self.teamacs[1].load_state_dict(ado_dict)
+            self.teamacs[1].ac.update_distribution(obs_batch)
+            dist_ado = self.teamacs[1].ac.distribution
+            kl_divs.append(torch.mean(torch.sum(torch.distributions.kl_divergence(dist_ado, dist_ego), dim = 1)).item())       
+        self.teamacs = current_models
+        print('[MAAC POPULATION UPDATE] KLs', kl_divs)
+
+        if np.min(kl_divs)>0.05:
+            self.redraw_ac_networks(save = True)
+        else:
+            self.redraw_ac_networks(save = False)
+
+    def redraw_ac_networks(self, save):
 
         #update population of competing agents, here simply load 
         #old version of agent 1 into ac2 slot
-        self.past_models.append(copy.deepcopy(teamac1.state_dict()))
-        # self.past_ratings_mu.append(self.agentratings[0][0].mu)
-        # self.past_ratings_sigma.append(self.agentratings[0][0].sigma)
-        if len(self.past_models) > self.max_num_models:
-            idx_del = np.random.randint(0, self.max_num_models-2)
-            del self.past_models[idx_del]
-            # del self.past_ratings_mu[idx_del]
-            # del self.past_ratings_sigma[idx_del]
+        if save:
+            self.past_models.append(copy.deepcopy(self.teamacs[0].state_dict()))
+            self.past_ratings_mu.append(self.agentratings[0][0].mu)
+            self.past_ratings_sigma.append(self.agentratings[0][0].sigma)
+            if len(self.past_models)> self.max_num_models:
+                idx_del = np.random.randint(0, self.max_num_models-2)
+                del self.past_models[idx_del]
+                del self.past_ratings_mu[idx_del]
+                del self.past_ratings_sigma[idx_del]
 
         #select model to load
         #renormalize dist
-        #if len(self.past_models) !=self.max_num_models:
-        prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):] + 1e-4) * (self.draw_probs_unnorm[-len(self.past_models):] + 1e-4)
+        if len(self.past_models) !=self.max_num_models:
+            prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):]) * self.draw_probs_unnorm[-len(self.past_models):]
+        else:
+            prob = 1/np.sum(self.draw_probs_unnorm + 1e-4) *(self.draw_probs_unnorm + 1e-4)
+        
         idx = np.random.choice(len(self.past_models), self.num_teams-1, p = prob)
         for agent_id, past_model_id in enumerate(idx):
             op_id = agent_id + 1
 
             state_dict = self.past_models[past_model_id]
-            # mu = self.past_ratings_mu[past_model_id]
-            # sigma = self.past_ratings_sigma[past_model_id]
+            mu = self.past_ratings_mu[past_model_id]
+            sigma = self.past_ratings_sigma[past_model_id]
             self.teamacs[op_id].load_state_dict(state_dict)
             self.teamacs[op_id].to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
-            # rating = (trueskill.Rating(mu = mu, sigma = sigma ),) 
-            # self.agentratings[op_id+1] = rating
+            rating = (trueskill.Rating(mu = mu, sigma = sigma ),) 
+            self.agentratings[op_id] = rating
 
         # rating_train_pol = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = self.agentratings[0][0].sigma),)
         # self.agentratings[0] = rating_train_pol 
         
-    def new_rating(self, mu, sigma):
-        return (trueskill.Rating(mu = mu, sigma = sigma ),) 
 
 
 #multi agent actor critic with centralized critic for a single team
@@ -466,10 +503,6 @@ class CMAActorCritic(nn.Module):
                                             **kwargs)
         else:
             raise NotImplementedError
-
-        self.agentratings = []
-        for idx in range(num_agents):
-            self.agentratings.append((trueskill.Rating(mu=0),))
 
             
 #        if kwargs:
@@ -585,7 +618,7 @@ class CMAActorCritic(nn.Module):
     def evaluate_inference(self, observations, **kwargs):
         values = []
         values = [self.ac.evaluate(observations[:, 0,:])]
-        op_values = [ac.evaluate(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
+        op_values = [ac.evaluate(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]  # FIXME: this does not exist!
         values += op_values 
         values = torch.cat(tuple(values), dim = 1)
         return values
@@ -594,34 +627,22 @@ class CMAActorCritic(nn.Module):
         value = self.ac.evaluate(critic_observations)
         return value
 
-    def get_ratings(self,):
-        return self.agentratings
+    # def get_ratings(self,):
+    #     return self.agentratings
 
-    def set_ratings(self, ratings):
-        self.agentratings = ratings
+    # def set_ratings(self, ratings):
+    #     self.agentratings = ratings
 
-    def update_ac_ratings(self, infos):
-        #update performance metrics of current policies
-        if 'ranking' in infos:         
-            avgranking = infos['ranking'][0].cpu().numpy() #torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
-            update_ratio = infos['ranking'][1]
-            new_ratings = trueskill.rate(self.agentratings, avgranking)
-            for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
-                mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
-                sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
-                self.agentratings[it] = (trueskill.Rating(mu, sigma),)
+    # def update_ac_ratings(self, infos):
+    #     #update performance metrics of current policies
+    #     if 'ranking' in infos:         
+    #         avgranking = infos['ranking'][0].cpu().numpy() #torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
+    #         update_ratio = infos['ranking'][1]
+    #         new_ratings = trueskill.rate(self.agentratings, avgranking)
+    #         for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
+    #             mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
+    #             sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
+    #             self.agentratings[it] = (trueskill.Rating(mu, sigma),)
 
-    def update_ac_ratings(self, infos):
-        pass
-        # #update performance metrics of current policies
-        # if 'ranking' in infos:         
-        #     avgranking = infos['ranking'][0].cpu().numpy() #torch.mean(1.0*infos['ranking'], dim = 0).cpu().numpy()
-        #     update_ratio = infos['ranking'][1]
-        #     new_ratings = trueskill.rate(self.agentratings, avgranking)
-        #     for old, new, it in zip(self.agentratings, new_ratings, range(len(self.agentratings))):
-        #         mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
-        #         sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
-        #         self.agentratings[it] = (trueskill.Rating(mu, sigma),)
-
-    def new_rating(self, mu, sigma):
-        return (trueskill.Rating(mu = mu, sigma = sigma ),) 
+    # def new_rating(self, mu, sigma):
+    #     return (trueskill.Rating(mu = mu, sigma = sigma ),) 
