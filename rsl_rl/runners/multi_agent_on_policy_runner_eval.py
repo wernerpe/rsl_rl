@@ -80,6 +80,11 @@ class MAOnPolicyRunner:
         self.max_epsiode_len_eval = self.env.max_episode_length
         self.eval_interval_steps = self.cfg["eval_interval"]
 
+        # self.attention_network = self.alg.actor_critic.teamacs[0].ac.encoder._network
+        # self.attention_tensor = torch.zeros((env.num_envs, env.num_agents-1))
+        self.num_ego_obs = self.alg.actor_critic.teamacs[0].ac.encoder.num_ego_obs
+        self.num_ado_obs = self.alg.actor_critic.teamacs[0].ac.encoder.num_ado_obs
+        self.num_agents = self.alg.actor_critic.teamacs[0].ac.encoder.num_agents
 
         # init storage and model
         self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions], actor_critic.team_size)
@@ -100,6 +105,16 @@ class MAOnPolicyRunner:
                     
                 with open(self.log_dir + '/cfg.yml', 'w') as outfile:
                     yaml.dump(self.env.cfg, outfile, default_flow_style=False)
+
+    def get_attention(self, obs, attention_tensor):
+
+        obs_ego = obs[..., :self.num_ego_obs]
+        obs_ado = obs[..., self.num_ego_obs:self.num_ego_obs+(self.num_agents-1)*self.num_ado_obs]
+
+        for ado_id in range(self.num_agents-1):
+            ado_ag_obs = obs_ado[..., ado_id::(self.num_agents-1)]
+            attention_tensor[:, ado_id] = self.attention_network(torch.cat((obs_ego, ado_ag_obs), dim=-1).detach()).squeeze()
+        return attention_tensor
 
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         self.init_at_random_ep_len = init_at_random_ep_len
@@ -134,8 +149,12 @@ class MAOnPolicyRunner:
                 for i in range(self.num_steps_per_env):
                     actions = self.alg.act(obs, critic_obs)
 
+                    # Visualization
                     self.env.viewer.update_values(self.alg.values_separate)
                     self.env.viewer.update_ranks(self.env.ranks)
+                    # attention = self.get_attention(obs[:, 0, :], self.attention_tensor)
+                    attention = self.alg.actor_critic.teamacs[0].ac.encoder.attention_weights.mean(dim=0, keepdim=True)
+                    self.env.viewer.update_attention(attention)
 
                     # obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
                     obs, privileged_obs, rewards, dones, infos = self.env.step_with_importance_sampling_check(actions, self.alg.value_std_cur_norm)
@@ -202,6 +221,15 @@ class MAOnPolicyRunner:
         policy = self.alg.actor_critic.act_inference
         for ev_it in range(self.env.max_episode_length+1):
             actions = policy(obs)
+
+            # Visualization
+            svalues = torch.concat([self.alg.actor_critic.evaluate(obs[:, agent_id, :].unsqueeze(1)).detach() for agent_id in self.alg.actor_critic.teams[0]], dim=-2)
+            self.env.viewer.update_values(svalues)
+            self.env.viewer.update_ranks(self.env.ranks)
+            # attention = self.get_attention(obs[:, 0, :], self.attention_tensor)
+            attention = self.alg.actor_critic.teamacs[0].ac.encoder.attention_weights.mean(dim=0, keepdim=True)
+            self.env.viewer.update_attention(attention)
+
             obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
             
             eval_ep_duration += ev_it*dones*(~already_done)
