@@ -202,6 +202,8 @@ class MAOnPolicyRunner:
         policy = self.alg.actor_critic.act_inference
         for ev_it in range(self.env.max_episode_length+1):
             actions = policy(obs)
+            #self.env.viewer.update_values(self.alg.values_separate)
+            self.env.viewer.update_ranks(self.env.ranks)
             obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
             
             eval_ep_duration += ev_it*dones*(~already_done)
