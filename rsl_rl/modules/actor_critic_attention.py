@@ -35,7 +35,7 @@ import torch.nn as nn
 from torch.distributions import Normal
 from torch.nn.modules import rnn
 
-from rsl_rl.modules.attention.encoders import EncoderAttention1, EncoderAttention2
+from rsl_rl.modules.attention.encoders import EncoderAttention1, EncoderAttention2, EncoderAttention3, EncoderAttention4
 
 
 class ActorCriticAttention(nn.Module):
@@ -57,14 +57,19 @@ class ActorCriticAttention(nn.Module):
 
         activation = get_activation(activation)
 
+        encoder_type = kwargs['encoder_type']
+        encoder_hidden_dims = kwargs['encoder_hidden_dims']
+
+        teamsize = kwargs['teamsize']
+        numteams = kwargs['numteams']
+
         num_agent_max = num_agents
         num_ego_obs = num_ego_obs
         num_ado_obs = num_ado_obs
-        mlp_input_dim_a = num_ego_obs + num_ado_obs
-        mlp_input_dim_c = num_ego_obs + num_ado_obs
-
-        encoder_type = kwargs['encoder_type']
-        encoder_hidden_dims = kwargs['encoder_hidden_dims']
+        # mlp_input_dim_a = num_ego_obs + 1*num_ado_obs
+        # mlp_input_dim_c = num_ego_obs + 1*num_ado_obs
+        mlp_input_dim_a = num_ego_obs + encoder_hidden_dims[-1]
+        mlp_input_dim_c = num_ego_obs + encoder_hidden_dims[-1]
 
         # Encoder
         self.encoder = get_encoder(
@@ -73,6 +78,8 @@ class ActorCriticAttention(nn.Module):
           num_ado_obs=num_ado_obs, 
           hidden_dims=encoder_hidden_dims, 
           num_agents=num_agent_max,
+          teamsize=teamsize,
+          numteams=numteams,
           activation=activation
         )
 
@@ -270,7 +277,7 @@ class CriticAttention(nn.Module):
         return self._network(latent)
 
 
-def get_encoder(encoder_type, num_ego_obs, num_ado_obs, hidden_dims, num_agents, activation):
+def get_encoder(encoder_type, num_ego_obs, num_ado_obs, hidden_dims, num_agents, teamsize, numteams, activation):
     if encoder_type=="attention1":
         return EncoderAttention1(
           num_ego_obs=num_ego_obs, 
@@ -287,6 +294,26 @@ def get_encoder(encoder_type, num_ego_obs, num_ado_obs, hidden_dims, num_agents,
           hidden_dims=hidden_dims, 
           output_dim=1, 
           num_agents=num_agents,
+          activation=activation
+        )
+    elif encoder_type=="attention3":
+        return EncoderAttention3(
+          num_ego_obs=num_ego_obs, 
+          num_ado_obs=num_ado_obs, 
+          hidden_dims=hidden_dims, 
+          output_dim=num_ado_obs, 
+          numteams=numteams, 
+          teamsize=teamsize,
+          activation=activation
+        )
+    elif encoder_type=="attention4":
+        return EncoderAttention4(
+          num_ego_obs=num_ego_obs, 
+          num_ado_obs=num_ado_obs, 
+          hidden_dims=hidden_dims, 
+          output_dim=num_ado_obs, 
+          numteams=numteams, 
+          teamsize=teamsize,
           activation=activation
         )
 
