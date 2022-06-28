@@ -152,9 +152,9 @@ class MAOnPolicyRunner:
                     # Visualization
                     self.env.viewer.update_values(self.alg.values_separate)
                     self.env.viewer.update_ranks(self.env.ranks)
-                    # attention = self.get_attention(obs[:, 0, :], self.attention_tensor)
-                    attention = self.alg.actor_critic.teamacs[0].ac.encoder.attention_weights.mean(dim=0, keepdim=True)
-                    self.env.viewer.update_attention(attention)
+                    #attention = self.get_attention(obs[:, 0, :], self.attention_tensor)
+                    #attention = self.alg.actor_critic.teamacs[0].ac.encoder.attention_weights.mean(dim=0, keepdim=True)
+                    #self.env.viewer.update_attention(attention)
 
                     # obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
                     obs, privileged_obs, rewards, dones, infos = self.env.step_with_importance_sampling_check(actions, self.alg.value_std_cur_norm)
@@ -227,8 +227,8 @@ class MAOnPolicyRunner:
             self.env.viewer.update_values(svalues)
             self.env.viewer.update_ranks(self.env.ranks)
             # attention = self.get_attention(obs[:, 0, :], self.attention_tensor)
-            attention = self.alg.actor_critic.teamacs[0].ac.encoder.attention_weights.mean(dim=0, keepdim=True)
-            self.env.viewer.update_attention(attention)
+            #attention = self.alg.actor_critic.teamacs[0].ac.encoder.attention_weights.mean(dim=0, keepdim=True)
+            #self.env.viewer.update_attention(attention)
 
             obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
             

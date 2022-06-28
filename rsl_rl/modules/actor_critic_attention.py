@@ -66,10 +66,12 @@ class ActorCriticAttention(nn.Module):
         num_agent_max = num_agents
         num_ego_obs = num_ego_obs
         num_ado_obs = num_ado_obs
-        # mlp_input_dim_a = num_ego_obs + 1*num_ado_obs
-        # mlp_input_dim_c = num_ego_obs + 1*num_ado_obs
-        mlp_input_dim_a = num_ego_obs + encoder_hidden_dims[-1]
-        mlp_input_dim_c = num_ego_obs + encoder_hidden_dims[-1]
+        if encoder_type != 'attention4':
+            mlp_input_dim_a = num_ego_obs + 1*num_ado_obs
+            mlp_input_dim_c = num_ego_obs + 1*num_ado_obs
+        else:
+            mlp_input_dim_a = num_ego_obs + encoder_hidden_dims[-1]
+            mlp_input_dim_c = num_ego_obs + encoder_hidden_dims[-1]
 
         # Encoder
         self.encoder = get_encoder(
