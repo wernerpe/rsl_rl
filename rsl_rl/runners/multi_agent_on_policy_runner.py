@@ -28,97 +28,97 @@
 # #
 # # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
-# import time
-# import os
-# from collections import deque
-# import statistics
+import time
+import os
+from collections import deque
+import statistics
 
-# from torch.utils.tensorboard import SummaryWriter
-# import torch
+from torch.utils.tensorboard import SummaryWriter
+import torch
 
-# from rsl_rl.algorithms import PPO, IMAPPO, JRMAPPO
-# from rsl_rl.modules import MAActorCritic, MultiTeamCMAAC
-# from rsl_rl.env import VecEnv
-# import yaml
-# import os
+from rsl_rl.algorithms import PPO, IMAPPO, JRMAPPO
+from rsl_rl.modules import MAActorCritic, MultiTeamCMAAC
+from rsl_rl.env import VecEnv
+import yaml
+import os
 
-# class MAOnPolicyRunner:
-#     actor_critic_class: MultiTeamCMAAC
-#     def __init__(self,
-#                  env: VecEnv,
-#                  train_cfg,
-#                  log_dir=None,
-#                  device='cpu',
-#                  num_agents = 2):
-#         self.train_cfg = train_cfg
-#         self.cfg=train_cfg["runner"]
-#         self.alg_cfg = train_cfg["algorithm"]
-#         self.policy_cfg = train_cfg["policy"]
-#         self.device = device
-#         self.env = env
-#         if self.env.num_privileged_obs is not None:
-#             num_critic_obs = self.env.num_privileged_obs 
-#         else:
-#             num_critic_obs = self.env.num_obs
-#         actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCritic
-#         if self.cfg["algorithm_class_name"] == 'JRMAPPO' and self.cfg["policy_class_name"] != 'MultiTeamCMAAC':
-#             raise ValueError("Please use MultiTeamCMAAC in combination with Joint-Ratio Multi Agent PPO")
-#         elif self.cfg["algorithm_class_name"] == 'IMAPPO' and self.cfg["policy_class_name"] != 'MAActorCritic':
-#             raise ValueError("Please use MAActorCritic in combination with Independent Multi Agent PPO")
+class MAOnPolicyRunner:
+    actor_critic_class: MultiTeamCMAAC
+    def __init__(self,
+                 env: VecEnv,
+                 train_cfg,
+                 log_dir=None,
+                 device='cpu',
+                 num_agents = 2):
+        self.train_cfg = train_cfg
+        self.cfg=train_cfg["runner"]
+        self.alg_cfg = train_cfg["algorithm"]
+        self.policy_cfg = train_cfg["policy"]
+        self.device = device
+        self.env = env
+        if self.env.num_privileged_obs is not None:
+            num_critic_obs = self.env.num_privileged_obs 
+        else:
+            num_critic_obs = self.env.num_obs
+        actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCritic
+        if self.cfg["algorithm_class_name"] == 'JRMAPPO' and self.cfg["policy_class_name"] != 'MultiTeamCMAAC':
+            raise ValueError("Please use MultiTeamCMAAC in combination with Joint-Ratio Multi Agent PPO")
+        elif self.cfg["algorithm_class_name"] == 'IMAPPO' and self.cfg["policy_class_name"] != 'MAActorCritic':
+            raise ValueError("Please use MAActorCritic in combination with Independent Multi Agent PPO")
 
-#         actor_critic = actor_critic_class( self.env.num_obs,
-#                                                         num_critic_obs,
-#                                                         num_agents,
-#                                                         self.env.num_actions,
-#                                                         **self.policy_cfg).to(self.device)
-#         alg_class = eval(self.cfg["algorithm_class_name"]) 
-#         self.alg = alg_class(actor_critic, device=self.device, **self.alg_cfg)
-#         self.num_steps_per_env = self.cfg["num_steps_per_env"]
-#         self.population_update_interval = self.cfg["population_update_interval"]
-#         self.save_interval = self.cfg["save_interval"]
+        actor_critic = actor_critic_class( self.env.num_obs,
+                                                        num_critic_obs,
+                                                        num_agents,
+                                                        self.env.num_actions,
+                                                        **self.policy_cfg).to(self.device)
+        alg_class = eval(self.cfg["algorithm_class_name"]) 
+        self.alg = alg_class(actor_critic, device=self.device, **self.alg_cfg)
+        self.num_steps_per_env = self.cfg["num_steps_per_env"]
+        self.population_update_interval = self.cfg["population_update_interval"]
+        self.save_interval = self.cfg["save_interval"]
 
-#         # init storage and model
-#         self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions], actor_critic.team_size)
+        # init storage and model
+        self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions], actor_critic.team_size)
 
-#         # Log
-#         self.log_dir = log_dir
-#         self.track_cfg = train_cfg['track_cfgs']
-#         self.writer = None
-#         self.tot_timesteps = 0
-#         self.tot_time = 0
-#         self.current_learning_iteration = 0
+        # Log
+        self.log_dir = log_dir
+        self.track_cfg = train_cfg['track_cfgs']
+        self.writer = None
+        self.tot_timesteps = 0
+        self.tot_time = 0
+        self.current_learning_iteration = 0
 
-#         _, _ = self.env.reset()
+        _, _ = self.env.reset()
     
-#     def store_cfgs(self,):
-#                 with open(self.log_dir + '/cfg_train.yml', 'w') as outfile:
-#                     yaml.dump(self.train_cfg, outfile, default_flow_style=False)
+    def store_cfgs(self,):
+                with open(self.log_dir + '/cfg_train.yml', 'w') as outfile:
+                    yaml.dump(self.train_cfg, outfile, default_flow_style=False)
                     
-#                 with open(self.log_dir + '/cfg.yml', 'w') as outfile:
-#                     yaml.dump(self.env.cfg, outfile, default_flow_style=False)
+                with open(self.log_dir + '/cfg.yml', 'w') as outfile:
+                    yaml.dump(self.env.cfg, outfile, default_flow_style=False)
 
-#     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
-#         # initialize writer
-#         if self.log_dir is not None and self.writer is None:
-#             self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
-#             if self.track_cfg:
-#                 self.store_cfgs()
+    def learn(self, num_learning_iterations, init_at_random_ep_len=False):
+        # initialize writer
+        if self.log_dir is not None and self.writer is None:
+            self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
+            if self.track_cfg:
+                self.store_cfgs()
 
-#         if init_at_random_ep_len:
-#             self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
-#         obs = self.env.get_observations()
-#         privileged_obs = self.env.get_privileged_observations()
-#         critic_obs = privileged_obs if privileged_obs is not None else obs
-#         obs, critic_obs = obs.to(self.device), critic_obs.to(self.device)
-#         self.alg.actor_critic.train() # switch to train mode (for dropout for example)
+        if init_at_random_ep_len:
+            self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
+        obs = self.env.get_observations()
+        privileged_obs = self.env.get_privileged_observations()
+        critic_obs = privileged_obs if privileged_obs is not None else obs
+        obs, critic_obs = obs.to(self.device), critic_obs.to(self.device)
+        self.alg.actor_critic.train() # switch to train mode (for dropout for example)
 
-#         ep_infos = []
-#         rewbuffer = deque(maxlen=100)
-#         trewbuffer = deque(maxlen=100)
-#         lenbuffer = deque(maxlen=100)
-#         cur_mean_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
-#         cur_mean_team_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
-#         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        ep_infos = []
+        rewbuffer = deque(maxlen=100)
+        trewbuffer = deque(maxlen=100)
+        lenbuffer = deque(maxlen=100)
+        cur_mean_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_mean_team_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
         for it in range(self.current_learning_iteration, tot_iter):
@@ -137,25 +137,25 @@
                     obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
                     self.alg.process_env_step(rewards, dones, infos)
                     
-#                     if self.log_dir is not None:
-#                         # Book keeping
-#                         if 'episode' in infos:
-#                             ep_infos.append(infos['episode'])
-#                         cur_mean_reward_sum += torch.sum(torch.mean(rewards[:, self.alg.actor_critic.teams[0], :], dim = 1), dim = 1)
-#                         cur_mean_team_reward_sum += torch.mean(rewards[:, self.alg.actor_critic.teams[0], 1], dim = 1)
-#                         cur_episode_length += 1
-#                         new_ids = (dones > 0).nonzero(as_tuple=False)
-#                         rewbuffer.extend(cur_mean_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
-#                         trewbuffer.extend(cur_mean_team_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
-#                         lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
-#                         cur_mean_reward_sum[new_ids] = 0
-#                         cur_mean_team_reward_sum[new_ids] = 0
-#                         cur_episode_length[new_ids] = 0
+                    if self.log_dir is not None:
+                        # Book keeping
+                        if 'episode' in infos:
+                            ep_infos.append(infos['episode'])
+                        cur_mean_reward_sum += torch.sum(torch.mean(rewards[:, self.alg.actor_critic.teams[0], :], dim = 1), dim = 1)
+                        cur_mean_team_reward_sum += torch.mean(rewards[:, self.alg.actor_critic.teams[0], 1], dim = 1)
+                        cur_episode_length += 1
+                        new_ids = (dones > 0).nonzero(as_tuple=False)
+                        rewbuffer.extend(cur_mean_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                        trewbuffer.extend(cur_mean_team_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                        lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+                        cur_mean_reward_sum[new_ids] = 0
+                        cur_mean_team_reward_sum[new_ids] = 0
+                        cur_episode_length[new_ids] = 0
 
-#                     self.alg.actor_critic.update_ac_ratings(infos)
+                    self.alg.actor_critic.update_ac_ratings(infos)
 
-#                 stop = time.time()
-#                 collection_time = stop - start
+                stop = time.time()
+                collection_time = stop - start
 
                 # self.env.viewer.save_uncertain_imgs()
 
@@ -163,41 +163,41 @@
                 start = stop
                 self.alg.compute_returns(critic_obs)
             
-#             mean_value_loss, mean_surrogate_loss, aux_info_loss = self.alg.update()
-#             if  it % self.population_update_interval == 0:
-#                 self.alg.update_population()
-#             stop = time.time()
-#             learn_time = stop - start
-#             if self.log_dir is not None:
-#                 self.log(locals())
-#             if it % self.save_interval == 0:
-#                 self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
-#             ep_infos.clear()
+            mean_value_loss, mean_surrogate_loss, aux_info_loss = self.alg.update()
+            if  it % self.population_update_interval == 0:
+                self.alg.update_population()
+            stop = time.time()
+            learn_time = stop - start
+            if self.log_dir is not None:
+                self.log(locals())
+            if it % self.save_interval == 0:
+                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
+            ep_infos.clear()
         
-#         self.current_learning_iteration += num_learning_iterations
-#         self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
+        self.current_learning_iteration += num_learning_iterations
+        self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
 
-#     def log(self, locs, width=80, pad=35):
-#         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
-#         self.tot_time += locs['collection_time'] + locs['learn_time']
-#         iteration_time = locs['collection_time'] + locs['learn_time']
+    def log(self, locs, width=80, pad=35):
+        self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
+        self.tot_time += locs['collection_time'] + locs['learn_time']
+        iteration_time = locs['collection_time'] + locs['learn_time']
 
-#         ep_string = f''
-#         if locs['ep_infos']:
-#             for key in locs['ep_infos'][0]:
-#                 infotensor = torch.tensor([], device=self.device)
-#                 for ep_info in locs['ep_infos']:
-#                     # handle scalar and zero dimensional tensor infos
-#                     if not isinstance(ep_info[key], torch.Tensor):
-#                         ep_info[key] = torch.Tensor([ep_info[key]])
-#                     if len(ep_info[key].shape) == 0:
-#                         ep_info[key] = ep_info[key].unsqueeze(0)
-#                     infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
-#                 value = torch.mean(infotensor)
-#                 self.writer.add_scalar('Episode/' + key, value, locs['it'])
-#                 ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
-#         mean_std = self.alg.actor_critic.std.mean()
-#         fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
+        ep_string = f''
+        if locs['ep_infos']:
+            for key in locs['ep_infos'][0]:
+                infotensor = torch.tensor([], device=self.device)
+                for ep_info in locs['ep_infos']:
+                    # handle scalar and zero dimensional tensor infos
+                    if not isinstance(ep_info[key], torch.Tensor):
+                        ep_info[key] = torch.Tensor([ep_info[key]])
+                    if len(ep_info[key].shape) == 0:
+                        ep_info[key] = ep_info[key].unsqueeze(0)
+                    infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
+                value = torch.mean(infotensor)
+                self.writer.add_scalar('Episode/' + key, value, locs['it'])
+                ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+        mean_std = self.alg.actor_critic.std.mean()
+        fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
 
         ego_action_mean_per_dim = self.alg.actor_critic.ego_action_mean.mean(dim=0)
         ego_action_std_per_dim = self.alg.actor_critic.ego_action_std.mean(dim=0)
@@ -229,14 +229,14 @@
             self.writer.add_scalar('Train/min_episode_length', min(locs['lenbuffer']), locs['it'])
             self.writer.add_scalar('Train/max_episode_length', max(locs['lenbuffer']), locs['it'])
             self.writer.add_scalar('Train/episode_1step_freq', locs['lenbuffer'].count(1.0)/len(locs['lenbuffer']), locs['it'])
-            # self.writer.add_scalar('Train/min_episode_length_env', min(locs['lenbuffer2']), locs['it'])
-            # self.writer.add_scalar('Train/max_episode_length_env', max(locs['lenbuffer2']), locs['it'])
+            self.writer.add_scalar('Train/min_episode_length_env', min(locs['lenbuffer2']), locs['it'])
+            self.writer.add_scalar('Train/max_episode_length_env', max(locs['lenbuffer2']), locs['it'])
 
-#         if len(locs['trewbuffer']) > 0:
-#             self.writer.add_scalar('Train/mean_team_reward', statistics.mean(locs['trewbuffer']), locs['it'])
-#             self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
-#             self.writer.add_scalar('Train/mean_team_reward/time', statistics.mean(locs['trewbuffer']), self.tot_time)
-#             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
+        if len(locs['trewbuffer']) > 0:
+            self.writer.add_scalar('Train/mean_team_reward', statistics.mean(locs['trewbuffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_team_reward/time', statistics.mean(locs['trewbuffer']), self.tot_time)
+            self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
 
 
         string = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
@@ -264,84 +264,84 @@
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
-                        #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
-                        #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
+                          #f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
+                          #f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
 
-#         log_string += ep_string
-#         log_string += (f"""{'-' * width}\n"""
-#                        f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
-#                        f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
-#                        f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
-#                        f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
-#                                locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
-#         print(log_string)
+        log_string += ep_string
+        log_string += (f"""{'-' * width}\n"""
+                       f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
+                       f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
+                       f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
+                       f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
+                               locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
+        print(log_string)
 
-#     def save(self, path, infos=None):
-#         infos ={}# {'trueskill': {'mu':self.alg.actor_critic.agentratings[0][0].mu, 'sigma':self.alg.actor_critic.agentratings[0][0].sigma}}
-#         torch.save({
-#             'model_state_dict': self.alg.actor_critic.state_dict(),
-#             'optimizer_state_dict': self.alg.optimizer.state_dict(),
-#             'iter': self.current_learning_iteration,
-#             'infos': infos,
-#             }, path)
+    def save(self, path, infos=None):
+        infos ={}# {'trueskill': {'mu':self.alg.actor_critic.agentratings[0][0].mu, 'sigma':self.alg.actor_critic.agentratings[0][0].sigma}}
+        torch.save({
+            'model_state_dict': self.alg.actor_critic.state_dict(),
+            'optimizer_state_dict': self.alg.optimizer.state_dict(),
+            'iter': self.current_learning_iteration,
+            'infos': infos,
+            }, path)
 
-#     def load(self, path, load_optimizer=True):
-#         loaded_dict = torch.load(path)
-#         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
-#         if load_optimizer:
-#             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
-#         self.current_learning_iteration = loaded_dict['iter']
-#         return loaded_dict['infos']
+    def load(self, path, load_optimizer=True):
+        loaded_dict = torch.load(path)
+        self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
+        if load_optimizer:
+            self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
+        self.current_learning_iteration = loaded_dict['iter']
+        return loaded_dict['infos']
 
-#     def load_multi_path(self, paths, load_optimizer=True):
-#         model_dicts = []
-#         opt_dicts = []
-#         dicts = []
-#         for path in paths:
-#             dict = torch.load(path)
-#             dicts.append(dict)
-#             model_dicts.append(dict['model_state_dict'])
-#             opt_dicts.append(dict['optimizer_state_dict'])
-#         self.alg.actor_critic.load_multi_state_dict(model_dicts)
-#         if load_optimizer:
-#             self.alg.optimizer.load_state_dict(opt_dicts[0])
-#         self.current_learning_iteration = dicts[0]['iter']
+    def load_multi_path(self, paths, load_optimizer=True):
+        model_dicts = []
+        opt_dicts = []
+        dicts = []
+        for path in paths:
+            dict = torch.load(path)
+            dicts.append(dict)
+            model_dicts.append(dict['model_state_dict'])
+            opt_dicts.append(dict['optimizer_state_dict'])
+        self.alg.actor_critic.load_multi_state_dict(model_dicts)
+        if load_optimizer:
+            self.alg.optimizer.load_state_dict(opt_dicts[0])
+        self.current_learning_iteration = dicts[0]['iter']
 
-#         #add loaded models to buffers and set current ratings
-#         infos = []
-#         self.alg.actor_critic.past_models = model_dicts
-#         # self.alg.actor_critic.agentratings = []
-#         # self.alg.actor_critic.past_ratings_mu = []
-#         # self.alg.actor_critic.past_ratings_sigma = []
-#         for dict in dicts:
-#             info = dict['infos']
-#             # mu = info['trueskill']['mu']
-#             # sigma = info['trueskill']['sigma']
-#             # active_rating = self.alg.actor_critic.new_rating(mu, sigma)
-#             # self.alg.actor_critic.agentratings.append(active_rating)
-#             # self.alg.actor_critic.past_ratings_mu.append(mu)
-#             # self.alg.actor_critic.past_ratings_sigma.append(sigma)
-#             infos.append(info)
-#         return infos
+        #add loaded models to buffers and set current ratings
+        infos = []
+        self.alg.actor_critic.past_models = model_dicts
+        # self.alg.actor_critic.agentratings = []
+        # self.alg.actor_critic.past_ratings_mu = []
+        # self.alg.actor_critic.past_ratings_sigma = []
+        for dict in dicts:
+            info = dict['infos']
+            # mu = info['trueskill']['mu']
+            # sigma = info['trueskill']['sigma']
+            # active_rating = self.alg.actor_critic.new_rating(mu, sigma)
+            # self.alg.actor_critic.agentratings.append(active_rating)
+            # self.alg.actor_critic.past_ratings_mu.append(mu)
+            # self.alg.actor_critic.past_ratings_sigma.append(sigma)
+            infos.append(info)
+        return infos
     
-#     def populate_adversary_buffer(self, paths):
-#         for path in paths:
-#             dict = torch.load(path)
-#             info = dict['infos']
-#             #mu = info['trueskill']['mu']
-#             #sigma = info['trueskill']['sigma']
-#             #self.alg.actor_critic.past_ratings_mu.append(mu)
-#             #self.alg.actor_critic.past_ratings_sigma.append(sigma)
-#             self.alg.actor_critic.past_models.append(dict['model_state_dict'])
+    def populate_adversary_buffer(self, paths):
+        for path in paths:
+            dict = torch.load(path)
+            info = dict['infos']
+            #mu = info['trueskill']['mu']
+            #sigma = info['trueskill']['sigma']
+            #self.alg.actor_critic.past_ratings_mu.append(mu)
+            #self.alg.actor_critic.past_ratings_sigma.append(sigma)
+            self.alg.actor_critic.past_models.append(dict['model_state_dict'])
 
-#     def get_inference_policy(self, device=None):
-#         self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)
-#         if device is not None:
-#             self.alg.actor_critic.to(device)
-#         return self.alg.actor_critic.act_inference
+    def get_inference_policy(self, device=None):
+        self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)
+        if device is not None:
+            self.alg.actor_critic.to(device)
+        return self.alg.actor_critic.act_inference
 
-#     def get_value_functions(self, device=None):
-#         self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)
-#         if device is not None:
-#             self.alg.actor_critic.to(device)
-#         return self.alg.actor_critic.evaluate_inference
+    def get_value_functions(self, device=None):
+        self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)
+        if device is not None:
+            self.alg.actor_critic.to(device)
+        return self.alg.actor_critic.evaluate_inference
