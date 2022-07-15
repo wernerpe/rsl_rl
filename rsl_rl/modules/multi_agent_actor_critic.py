@@ -65,6 +65,7 @@ class MAActorCritic():
             self.agentratings.append((trueskill.Rating(mu=0),))
 
         self.max_num_models = kwargs['max_num_old_models']
+        self.kl_save_threshold = kwargs['kl_save_threshold']
         self.draw_probs_unnorm = np.ones((self.max_num_models,))
         self.draw_probs_unnorm[0:-3] = 0.4/(self.max_num_models-3)
         self.draw_probs_unnorm[-3:] = 0.6/3
@@ -193,7 +194,7 @@ class MAActorCritic():
         self.opponent_acs = current_ado_models
         print('[MAAC POPULATION UPDATE] KLs', kl_divs)
 
-        if np.min(kl_divs)>0.05:
+        if np.min(kl_divs)>self.kl_save_threshold:
             self.redraw_ac_networks(save = True)
         else:
             self.redraw_ac_networks(save = False)

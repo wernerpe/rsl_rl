@@ -62,6 +62,7 @@ class ActorCriticAttention(nn.Module):
 
         teamsize = kwargs['teamsize']
         numteams = kwargs['numteams']
+        self.predict_stddev = kwargs['predict_stddev']
 
         num_agent_max = num_agents
         num_ego_obs = num_ego_obs
@@ -86,21 +87,23 @@ class ActorCriticAttention(nn.Module):
         )
 
         # Policy
-        # self.actor = ActorAttention(
-        #   input_dim=mlp_input_dim_a, 
-        #   hidden_dims=actor_hidden_dims, 
-        #   output_dim=num_actions, 
-        #   activation=activation,
-        #   encoder=self.encoder,
-        # )
-        self.actor = ActorAttentionStddev(
-          input_dim=mlp_input_dim_a, 
-          hidden_dims=actor_hidden_dims, 
-          output_dim=num_actions, 
-          activation=activation,
-          encoder=self.encoder,
-          init_std=init_noise_std,
-        )
+        if self.predict_stddev:
+            self.actor = ActorAttentionStddev(
+            input_dim=mlp_input_dim_a, 
+            hidden_dims=actor_hidden_dims, 
+            output_dim=num_actions, 
+            activation=activation,
+            encoder=self.encoder,
+            init_std=init_noise_std,
+            )
+        else:
+            self.actor = ActorAttention(
+            input_dim=mlp_input_dim_a, 
+            hidden_dims=actor_hidden_dims, 
+            output_dim=num_actions, 
+            activation=activation,
+            encoder=self.encoder,
+            )
 
         # Value function
         # self.critic = CriticAttention(
@@ -158,11 +161,12 @@ class ActorCriticAttention(nn.Module):
         return self.distribution.entropy().sum(dim=-1)
 
     def update_distribution(self, observations):
-        # mean = self.actor(observations)
-        # self.distribution = Normal(mean, mean*0. + self.std)
-
-        mean, std = self.actor(observations)
-        self.distribution = Normal(mean, std)
+        if self.predict_stddev:
+            mean, std = self.actor(observations)
+            self.distribution = Normal(mean, std)
+        else:
+            mean = self.actor(observations)
+            self.distribution = Normal(mean, mean*0. + self.std)
 
     def act(self, observations, **kwargs):
         self.update_distribution(observations)
@@ -181,8 +185,10 @@ class ActorCriticAttention(nn.Module):
 
 
     def act_inference(self, observations):
-        # actions_mean = self.actor(observations)
-        actions_mean, _ = self.actor(observations)
+        if self.predict_stddev:
+            actions_mean, _ = self.actor(observations)
+        else:
+            actions_mean = self.actor(observations)
         return actions_mean
 
     def evaluate(self, critic_observations, **kwargs):

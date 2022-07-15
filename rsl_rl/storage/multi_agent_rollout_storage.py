@@ -151,7 +151,10 @@ class MultiAgentRolloutStorage:
 
         # Compute and normalize the advantages
         self.advantages = self.returns - self.values
-        self.advantages = self.advantages.mean(dim=2) - 0.5 * self.advantages.std(dim=2)
+        if self.advantages.shape[2] == 1:
+            self.advantages = self.advantages[:,:,0,:]
+        else:
+            self.advantages = self.advantages.mean(dim=2) - 0.5 * self.advantages.std(dim=2)
         self.advantages = (self.advantages - self.advantages.mean()) / (self.advantages.std() + 1e-8)
 
     def get_statistics(self):

@@ -82,9 +82,9 @@ class MAOnPolicyRunner:
 
         # self.attention_network = self.alg.actor_critic.teamacs[0].ac.encoder._network
         # self.attention_tensor = torch.zeros((env.num_envs, env.num_agents-1))
-        self.num_ego_obs = self.alg.actor_critic.teamacs[0].ac.encoder.num_ego_obs
-        self.num_ado_obs = self.alg.actor_critic.teamacs[0].ac.encoder.num_ado_obs
-        self.num_agents = self.alg.actor_critic.teamacs[0].ac.encoder.num_agents
+        #self.num_ego_obs = self.alg.actor_critic.teamacs[0].ac.encoder.num_ego_obs
+        #self.num_ado_obs = self.alg.actor_critic.teamacs[0].ac.encoder.num_ado_obs
+        #self.num_agents = self.alg.actor_critic.teamacs[0].ac.encoder.num_agents
 
         # init storage and model
         self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions], actor_critic.team_size)
@@ -150,14 +150,14 @@ class MAOnPolicyRunner:
                     actions = self.alg.act(obs, critic_obs)
 
                     # Visualization
-                    self.env.viewer.update_values(self.alg.values_separate)
-                    self.env.viewer.update_ranks(self.env.ranks)
+                    #self.env.viewer.update_values(self.alg.values_separate)
+                    #self.env.viewer.update_ranks(self.env.ranks)
                     #attention = self.get_attention(obs[:, 0, :], self.attention_tensor)
                     #attention = self.alg.actor_critic.teamacs[0].ac.encoder.attention_weights.mean(dim=0, keepdim=True)
                     #self.env.viewer.update_attention(attention)
 
-                    # obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
-                    obs, privileged_obs, rewards, dones, infos = self.env.step_with_importance_sampling_check(actions, self.alg.value_std_cur_norm)
+                    obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
+                    #obs, privileged_obs, rewards, dones, infos = self.env.step_with_importance_sampling_check(actions, self.alg.value_std_cur_norm)
                     critic_obs = privileged_obs if privileged_obs is not None else obs
                     obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
                     self.alg.process_env_step(rewards, dones, infos)
