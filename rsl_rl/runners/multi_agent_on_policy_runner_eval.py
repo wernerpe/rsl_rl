@@ -177,7 +177,7 @@ class MAOnPolicyRunner:
                         cur_mean_team_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
 
-                    self.alg.actor_critic.update_ac_ratings(infos)
+                    #self.alg.actor_critic.update_ac_ratings(infos)
 
                 stop = time.time()
                 collection_time = stop - start

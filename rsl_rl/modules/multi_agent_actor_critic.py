@@ -122,7 +122,8 @@ class MAActorCritic():
     def load_multi_state_dict(self, paths):
         self.ac1.load_state_dict(paths[0])
         for idx, path in enumerate(paths[1:]):
-            self.opponent_acs[idx].load_state_dict(path)
+            for ac in self.opponent_acs[idx]: 
+                ac.load_state_dict(path)
 
     def eval(self):
         self.ac1.eval()
