@@ -263,7 +263,7 @@ class MAOnPolicyRunner:
         self.writer.add_scalar('Eval/episode_reward_team', mean_ep_rewards_team, it)
         self.writer.add_scalar('Eval/episode_ranks', mean_ep_ranks, it)
         self.writer.add_scalar('Eval/rating 0', ratings[0][0].mu, it)
-        self.writer.add_scalar('Eval/rating 1', ratings[1][0].mu, it)
+        self.writer.add_scalar('Eval/rating 1', ratings[1][0][0].mu, it)
         
         print(log_string)
 

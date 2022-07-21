@@ -32,6 +32,8 @@ class MAActorCritic():
         self.num_teams = kwargs['numteams']
         self.team_size = kwargs['teamsize']
         self.n_critics = kwargs['numcritics']
+        self.n_ado_polices = kwargs.get('n_ado_polices', 1)
+
         self.teams = [torch.tensor([idx for idx in range(self.team_size*start, self.team_size*start+self.team_size)], dtype=torch.long) for start in range(self.num_teams)]
 
         if self.is_attentive:
@@ -57,12 +59,12 @@ class MAActorCritic():
 #            print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
         
         
-        self.opponent_acs = [copy.deepcopy(self.ac1) for _ in range(num_agents-1)]
+        self.opponent_acs = [[copy.deepcopy(self.ac1) for _ in range(self.n_ado_polices)] for _ in range(num_agents-1)]
         self.is_recurrent = False
 
-        self.agentratings = []
-        for idx in range(num_agents):
-            self.agentratings.append((trueskill.Rating(mu=0),))
+        self.agentratings = [(trueskill.Rating(mu=0),)]
+        for idx in range(num_agents-1):
+            self.agentratings.append([(trueskill.Rating(mu=0),) for _ in range(self.n_ado_polices)])
 
         self.max_num_models = kwargs['max_num_old_models']
         self.kl_save_threshold = kwargs['kl_save_threshold']
@@ -73,6 +75,7 @@ class MAActorCritic():
         self.past_models = [self.ac1.state_dict()]
         self.past_ratings_mu = [0]
         self.past_ratings_sigma = [self.agentratings[0][0].sigma]
+        
 
     def reset(self, dones=None):
         pass
@@ -123,8 +126,9 @@ class MAActorCritic():
 
     def eval(self):
         self.ac1.eval()
-        for ac in self.opponent_acs:
-            ac.eval()
+        for ac_gr in self.opponent_acs:
+            for ac in ac_gr:
+                ac.eval()
 
     def train(self):
        self.ac1.train()
@@ -132,23 +136,40 @@ class MAActorCritic():
     
     def to(self, device):
         self.ac1.to(device)
-        for ac in self.opponent_acs:
-            ac.to(device)
+        for ac_gr in self.opponent_acs:
+            for ac in ac_gr: 
+                ac.to(device)
         return self
 
     def act(self, observations, **kwargs):
+        obs_slice = int(observations.shape[0]/self.n_ado_polices)
         actions = []
         actions.append(self.ac1.act(observations[:, 0,:]).unsqueeze(1))
-        op_actions = [ac.act_inference(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
-        actions += op_actions 
+        for op_idx, ac_group in enumerate(self.opponent_acs):
+            op_act = []
+            for idx in range(len(ac_group)-1):
+                op_act.append(ac_group[idx].act_inference(observations[idx*obs_slice:(idx+1)*obs_slice, op_idx+1, :].unsqueeze(1)))
+            idx = len(ac_group)-1
+            op_act.append(ac_group[idx].act_inference(observations[idx*obs_slice:, op_idx+1, :].unsqueeze(1)))
+            actions.append(torch.cat(tuple(op_act), dim = 0))
+
+        #op_actions = [ac.act_inference(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
+        #actions += op_actions 
         actions = torch.cat(tuple(actions), dim = 1)
         return actions
     
     def act_inference(self, observations, **kwargs):
+        obs_slice = int(observations.shape[0]/self.n_ado_polices)
         actions = []
         actions.append(self.ac1.act_inference(observations[:, 0,:]).unsqueeze(1))
-        op_actions = [ac.act_inference(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
-        actions += op_actions 
+        #actions.append(self.ac1.act(observations[:, 0,:]).unsqueeze(1))
+        for op_idx, ac_group in enumerate(self.opponent_acs):
+            op_act = []
+            for idx in range(len(ac_group)-1):
+                op_act.append(ac_group[idx].act_inference(observations[idx*obs_slice:(idx+1)*obs_slice, op_idx+1, :].unsqueeze(1)))
+            idx = len(ac_group)-1
+            op_act.append(ac_group[idx].act_inference(observations[idx*obs_slice:, op_idx+1, :].unsqueeze(1)))
+            actions.append(torch.cat(tuple(op_act), dim = 0))
         actions = torch.cat(tuple(actions), dim = 1)
         return actions
         
@@ -160,10 +181,19 @@ class MAActorCritic():
         return self.ac1.distribution.log_prob(actions).sum(dim=-1)
     
     def evaluate_inference(self, observations, **kwargs):
+        obs_slice = int(observations.shape[0]/self.n_ado_polices)
         values = []
         values.append(self.ac1.evaluate(observations[:, 0,:]).unsqueeze(1))
-        op_values = [ac.evaluate(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
-        values += op_values 
+        #actions.append(self.ac1.act(observations[:, 0,:]).unsqueeze(1))
+        for op_idx, ac_group in enumerate(self.opponent_acs):
+            op_val = []
+            for idx in range(len(ac_group)-1):
+                op_val.append(ac_group[idx].evaluate(observations[idx*obs_slice:(idx+1)*obs_slice, op_idx+1, :].unsqueeze(1)))
+            idx = len(ac_group)-1
+            op_val.append(ac_group[idx].evaluate(observations[idx*obs_slice:, op_idx+1, :].unsqueeze(1)))
+            values.append(torch.cat(tuple(op_val), dim = 0))
+        #op_values = [ac.evaluate(observations[:, idx+1,:]).unsqueeze(1) for idx, ac in enumerate(self.opponent_acs)]
+        #values += op_values 
         values = torch.cat(tuple(values), dim = 1)
         return values
     
@@ -187,9 +217,9 @@ class MAActorCritic():
         self.ac1.update_distribution(obs_batch)
         dist_ego = self.ac1.distribution
         for ado_dict in self.past_models:
-            self.opponent_acs[0].load_state_dict(ado_dict)
-            self.opponent_acs[0].update_distribution(obs_batch)
-            dist_ado = self.opponent_acs[0].distribution
+            self.opponent_acs[0][0].load_state_dict(ado_dict)
+            self.opponent_acs[0][0].update_distribution(obs_batch)
+            dist_ado = self.opponent_acs[0][0].distribution
             kl_divs.append(torch.mean(torch.sum(torch.distributions.kl_divergence(dist_ado, dist_ego), dim = 1)).item())       
         self.opponent_acs = current_ado_models
         print('[MAAC POPULATION UPDATE] KLs', kl_divs)
@@ -219,16 +249,28 @@ class MAActorCritic():
         else:
             prob = 1/np.sum(self.draw_probs_unnorm + 1e-4) *(self.draw_probs_unnorm + 1e-4)
 
-        idx = np.random.choice(len(self.past_models), self.num_agents-1, p = prob)
-        for op_id, past_model_id in enumerate(idx):
+        idx = np.random.choice(len(self.past_models), (self.num_agents-1)*self.n_ado_polices, p = prob)
+        for op_id in range(self.num_agents-1):
+            for ac_gr_id in range(self.n_ado_polices):
+                state_dict = self.past_models[idx[self.n_ado_polices*op_id + ac_gr_id]]
+                mu = self.past_ratings_mu[idx[self.n_ado_polices*op_id + ac_gr_id]]
+                sigma = self.past_ratings_sigma[idx[self.n_ado_polices*op_id + ac_gr_id]]
+                self.opponent_acs[op_id][ac_gr_id].load_state_dict(state_dict)
+                self.opponent_acs[op_id][ac_gr_id].to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
+                rating = (trueskill.Rating(mu = mu, sigma = sigma ),)                    
+                self.agentratings[op_id+1][ac_gr_id] = rating
 
-            state_dict = self.past_models[past_model_id]
-            mu = self.past_ratings_mu[past_model_id]
-            sigma = self.past_ratings_sigma[past_model_id]
-            self.opponent_acs[op_id].load_state_dict(state_dict)
-            self.opponent_acs[op_id].to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
-            rating = (trueskill.Rating(mu = mu, sigma = sigma ),) 
-            self.agentratings[op_id+1] = rating
+
+
+        # for op_id, past_model_id in enumerate(idx):
+
+        #     state_dict = self.past_models[past_model_id]
+        #     mu = self.past_ratings_mu[past_model_id]
+        #     sigma = self.past_ratings_sigma[past_model_id]
+        #     self.opponent_acs[op_id].load_state_dict(state_dict)
+        #     self.opponent_acs[op_id].to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
+        #     rating = (trueskill.Rating(mu = mu, sigma = sigma ),) 
+        #     self.agentratings[op_id+1] = rating
 
         #rating_train_pol = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = self.agentratings[0][0].sigma),)
         #self.agentratings[0] = rating_train_pol 

@@ -117,11 +117,18 @@ class IMAPPO:
         ratings = self.actor_critic.get_ratings()
         update_ratio = (torch.mean(eval_ep_duration)/max_ep_len).item()
         mean_ranks = torch.mean(eval_ranks, dim = 0)
-        new_ratings = trueskill.rate(ratings, mean_ranks.cpu().numpy())
-        for it, (old, new) in enumerate(zip(ratings, new_ratings)):
-            mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
-            sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
-            ratings[it] = (trueskill.Rating(mu, sigma),)
+        slice_len = int(len(mean_ranks)/self.actor_critic.n_ado_polices)
+        for pol_idx in range(self.actor_critic.n_ado_polices):
+            rating_slice = [ratings[0]] + ratings[1:][pol_idx]
+            ranks_slice = mean_ranks[pol_idx*slice_len: (pol_idx+1)*slice_len, ...]
+
+            new_ratings = trueskill.rate(rating_slice, ranks_slice.cpu().numpy())
+            for it, (old, new) in enumerate(zip(rating_slice, new_ratings)):
+                mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
+                sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
+                rating_slice[it] = (trueskill.Rating(mu, sigma),)
+            ratings[0] = rating_slice[0]
+            ratings[1:][pol_idx] = rating_slice[1:]
         self.actor_critic.set_ratings(ratings)    
         return ratings
         
