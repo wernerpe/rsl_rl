@@ -129,8 +129,8 @@ class MAOnPolicyRunner:
                     actions = self.alg.act(obs, critic_obs)
                                         
                     # self.env.viewer.update_values(self.alg.transition.values)
-                    self.env.viewer.update_values(self.alg.values_separate)
-                    self.env.viewer.update_ranks(self.env.ranks)
+                    #self.env.viewer.update_values(self.alg.values_separate)
+                    #self.env.viewer.update_ranks(self.env.ranks)
 
                     obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
                     critic_obs = privileged_obs if privileged_obs is not None else obs
@@ -229,8 +229,8 @@ class MAOnPolicyRunner:
             self.writer.add_scalar('Train/min_episode_length', min(locs['lenbuffer']), locs['it'])
             self.writer.add_scalar('Train/max_episode_length', max(locs['lenbuffer']), locs['it'])
             self.writer.add_scalar('Train/episode_1step_freq', locs['lenbuffer'].count(1.0)/len(locs['lenbuffer']), locs['it'])
-            self.writer.add_scalar('Train/min_episode_length_env', min(locs['lenbuffer2']), locs['it'])
-            self.writer.add_scalar('Train/max_episode_length_env', max(locs['lenbuffer2']), locs['it'])
+            #self.writer.add_scalar('Train/min_episode_length_env', min(locs['lenbuffer2']), locs['it'])
+            #self.writer.add_scalar('Train/max_episode_length_env', max(locs['lenbuffer2']), locs['it'])
 
         if len(locs['trewbuffer']) > 0:
             self.writer.add_scalar('Train/mean_team_reward', statistics.mean(locs['trewbuffer']), locs['it'])

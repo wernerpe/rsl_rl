@@ -224,8 +224,8 @@ class MAOnPolicyRunner:
 
             # Visualization
             svalues = torch.concat([self.alg.actor_critic.evaluate(obs[:, agent_id, :].unsqueeze(1)).detach() for agent_id in self.alg.actor_critic.teams[0]], dim=-2)
-            self.env.viewer.update_values(svalues)
-            self.env.viewer.update_ranks(self.env.ranks)
+            #self.env.viewer.update_values(svalues)
+            #self.env.viewer.update_ranks(self.env.ranks)
             # attention = self.get_attention(obs[:, 0, :], self.attention_tensor)
             #attention = self.alg.actor_critic.teamacs[0].ac.encoder.attention_weights.mean(dim=0, keepdim=True)
             #self.env.viewer.update_attention(attention)
