@@ -235,13 +235,13 @@ class MAActorCritic():
         #old version of agent 1 into ac2 slot
         if save:
             self.past_models.append(copy.deepcopy(self.ac1.state_dict()))
-            self.past_ratings_mu.append(self.agentratings[0][0].mu)
-            self.past_ratings_sigma.append(self.agentratings[0][0].sigma)
+            #self.past_ratings_mu.append(self.agentratings[0][0].mu)
+            #self.past_ratings_sigma.append(self.agentratings[0][0].sigma)
             if len(self.past_models)> self.max_num_models:
                 idx_del = np.random.randint(0, self.max_num_models-2)
                 del self.past_models[idx_del]
-                del self.past_ratings_mu[idx_del]
-                del self.past_ratings_sigma[idx_del]
+                #del self.past_ratings_mu[idx_del]
+                #del self.past_ratings_sigma[idx_del]
 
         #select model to load
         #renormalize dist
@@ -254,12 +254,12 @@ class MAActorCritic():
         for op_id in range(self.num_agents-1):
             for ac_gr_id in range(self.n_ado_polices):
                 state_dict = self.past_models[idx[self.n_ado_polices*op_id + ac_gr_id]]
-                mu = self.past_ratings_mu[idx[self.n_ado_polices*op_id + ac_gr_id]]
-                sigma = self.past_ratings_sigma[idx[self.n_ado_polices*op_id + ac_gr_id]]
+                #mu = self.past_ratings_mu[idx[self.n_ado_polices*op_id + ac_gr_id]]
+                #sigma = self.past_ratings_sigma[idx[self.n_ado_polices*op_id + ac_gr_id]]
                 self.opponent_acs[op_id][ac_gr_id].load_state_dict(state_dict)
                 self.opponent_acs[op_id][ac_gr_id].to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
-                rating = (trueskill.Rating(mu = mu, sigma = sigma ),)                    
-                self.agentratings[op_id+1][ac_gr_id] = rating
+                #rating = (trueskill.Rating(mu = mu, sigma = sigma ),)                    
+                #self.agentratings[op_id+1][ac_gr_id] = rating
 
 
 

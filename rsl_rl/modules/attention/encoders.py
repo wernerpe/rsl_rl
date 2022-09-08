@@ -71,7 +71,7 @@ class EncoderAttention2(nn.Module):
       obs_ego = observations[..., :self.num_ego_obs]
       obs_ado = observations[..., self.num_ego_obs:self.num_ego_obs+(self.num_agents-1)*self.num_ado_obs]
 
-      latent = 0.0
+      latent = 0*obs_ado[..., 0::(self.num_agents-1)]
 
       for ado_id in range(self.num_agents-1):
           ado_ag_obs = obs_ado[..., ado_id::(self.num_agents-1)]
