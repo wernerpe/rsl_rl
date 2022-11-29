@@ -58,6 +58,9 @@ class BilevelActorCritic(nn.Module):
     def __init__(self,  num_actor_obs,
                         num_critic_obs,
                         num_actions,
+                        act_min,
+                        act_max,
+                        act_ini,
                         actor_hidden_dims=[256, 256, 256],
                         critic_hidden_dims=[256, 256, 256],
                         activation='elu',
@@ -72,11 +75,12 @@ class BilevelActorCritic(nn.Module):
         mlp_input_dim_a = num_actor_obs
         mlp_input_dim_c = num_critic_obs
 
-        self._mean_target_pos_max = nn.Parameter(torch.tensor([0.5, 0.5]), requires_grad=False)
-        self._mean_target_pos_min = nn.Parameter(torch.tensor([-0.5, -0.5]), requires_grad=False)
+        self._mean_target_pos_min = nn.Parameter(torch.tensor(act_min[:2]), requires_grad=False)
+        self._mean_target_pos_max = nn.Parameter(torch.tensor(act_max[:2]), requires_grad=False)
 
-        self._mean_target_std_ini = nn.Parameter(torch.tensor([0.5, 0.5]), requires_grad=False)
-        self._mean_target_std_min = nn.Parameter(torch.tensor([0.1, 0.1]), requires_grad=False)
+        self._mean_target_std_min = nn.Parameter(torch.tensor(act_min[2:]), requires_grad=False)
+        self._mean_target_std_max = nn.Parameter(torch.tensor(act_max[2:]), requires_grad=False)
+        self._mean_target_std_ini = nn.Parameter(torch.tensor(act_ini[2:]), requires_grad=False)
         self._softplus = nn.Softplus()
         
         # Policy
@@ -146,13 +150,15 @@ class BilevelActorCritic(nn.Module):
         return self.distribution.entropy().sum(dim=-1)
 
     def update_distribution(self, observations):
-        mean = self.actor(observations)
+        mean_raw = self.actor(observations)
         
-        mean[:, 0:2] = self._mean_target_pos_min + (self._mean_target_pos_max - self._mean_target_pos_min) * 0.5 * (torch.tanh(mean[:, 0:2]) + 1.0)
+        mean_target_pos = self._mean_target_pos_min + (self._mean_target_pos_max - self._mean_target_pos_min) * 0.5 * (torch.tanh(mean_raw[:, 0:2]) + 1.0)
 
-        # mean[:, 2:4] = self._softplus(mean[:, 2:4])
-        # mean[:, 2:4] *= self._mean_target_std_ini / self._softplus(0.0 * mean[:, 2:4])
-        # mean[:, 2:4] += self._mean_target_std_min
+        mean_target_std = self._softplus(mean_raw[:, 2:4])
+        mean_target_std = mean_target_std * self._mean_target_std_ini / self._softplus(torch.zeros_like(mean_target_std))
+        mean_target_std = mean_target_std + self._mean_target_std_min
+
+        mean = torch.concat((mean_target_pos, mean_target_std), dim=-1)
 
         self.distribution = Normal(mean, mean*0. + self.std)
 

@@ -58,14 +58,25 @@ class BilevelOnPolicyRunner:
             num_critic_obs = self.env.num_privileged_obs 
         else:
             num_critic_obs = self.env.num_obs
-        self.num_actions_hl = 2  # target_pos, target_std
+        
+        self.num_actions_hl = self.env.num_actions_hl
+        self.num_obs_add_ll = self.env.num_obs_add_ll
+        self.dt_hl = self.env.dt_hl
+
+        act_min = self.env.action_min_hl
+        act_max = self.env.action_max_hl
+        act_ini = self.env.action_ini_hl
+
         actor_critic_class = eval(self.cfg["policy_class_name"]) # BilevelActorCritic
         actor_critic: BilevelActorCritic = actor_critic_class( self.env.num_obs,
                                                         num_critic_obs,
                                                         self.num_actions_hl,
+                                                        act_min=act_min,
+                                                        act_max=act_max,
+                                                        act_ini=act_ini,
                                                         **self.policy_cfg).to(self.device)
-        self.actor_critic_ll = ActorCritic( self.env.num_obs + 5,
-                                                        num_critic_obs + 5,  # target_pos, target_std, ll_steps
+        self.actor_critic_ll = ActorCritic( self.env.num_obs + self.num_obs_add_ll,
+                                                        num_critic_obs + self.num_obs_add_ll,  # target_pos, target_std, ll_steps
                                                         self.env.num_actions,
                                                         **self.policy_cfg).to(self.device)
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
@@ -137,7 +148,7 @@ class BilevelOnPolicyRunner:
                       critic_obs = privileged_obs if privileged_obs is not None else obs
                       obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
                       reward_ep_ll += rewards
-                      if ((self.env.total_step) % 20)==0:
+                      if ((self.env.total_step) % self.dt_hl)==0:
                         break
                     self.alg.process_env_step(reward_ep_ll, dones, infos)
                     
