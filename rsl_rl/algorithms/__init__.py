@@ -29,6 +29,8 @@
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
 from .ppo import PPO
+from .hierarchical_ppo import HierarchicalPPO
+from .bilevel_ppo import BilevelPPO
 
 #fully independent learning
 from .independent_multi_agent_ppo import IMAPPO
