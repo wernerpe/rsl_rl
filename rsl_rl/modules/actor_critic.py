@@ -72,6 +72,9 @@ class ActorCritic(nn.Module):
         mlp_input_dim_a = num_actor_obs
         mlp_input_dim_c = num_critic_obs
 
+        # self._mean_act_min = nn.Parameter(1.1 * torch.tensor([-0.35, -1.0]), requires_grad=False)
+        # self._mean_act_max = nn.Parameter(1.1 * torch.tensor([+0.35, +1.0]), requires_grad=False)
+
         # Policy
         actor_layers = []
         actor_layers.append(nn.Linear(mlp_input_dim_a, actor_hidden_dims[0]))
@@ -138,8 +141,17 @@ class ActorCritic(nn.Module):
     def entropy(self):
         return self.distribution.entropy().sum(dim=-1)
 
+    def transform_mean_prediction(self, mean_raw):
+      # mean = self._mean_act_min + (self._mean_act_max - self._mean_act_min) * 0.5 * (torch.tanh(mean_raw) + 1.0)
+      # mean = mean_raw
+      mean = torch.tanh(mean_raw)
+      return mean
+
     def update_distribution(self, observations):
-        mean = self.actor(observations)
+        mean_raw = self.actor(observations)
+
+        mean = self.transform_mean_prediction(mean_raw)
+
         self.distribution = Normal(mean, mean*0. + self.std)
 
     def act(self, observations, **kwargs):
@@ -150,7 +162,10 @@ class ActorCritic(nn.Module):
         return self.distribution.log_prob(actions).sum(dim=-1)
 
     def act_inference(self, observations):
-        actions_mean = self.actor(observations)
+        actions_mean_raw = self.actor(observations)
+        
+        actions_mean = self.transform_mean_prediction(actions_mean_raw)
+
         return actions_mean
 
     def evaluate(self, critic_observations, **kwargs):

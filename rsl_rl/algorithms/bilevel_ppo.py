@@ -116,6 +116,9 @@ class BilevelPPO:
     def process_env_step(self, rewards, dones, infos):
         self.transition.rewards = rewards.clone()
         self.transition.dones = dones
+
+        self.transition = self.transition.squeeze_single_dims()  # FIXME: accomodate single agent
+        
         # Bootstrapping on time outs
         if 'time_outs' in infos:
             self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
@@ -181,6 +184,9 @@ class BilevelPPO:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
                 loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
+
+                # # Penalize large action means to counteract tanh saturation --> for Gaussian
+                # loss += (-1.0) * (self.actor_critic.distribution.mean**2).mean() - 0.1 * (self.actor_critic.distribution.scale**2).mean()
 
                 # Gradient step
                 self.optimizer.zero_grad()

@@ -33,6 +33,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
+from torch.distributions import OneHotCategorical, TransformedDistribution, AffineTransform
 from torch.nn.modules import rnn
 
 class Actor(nn.Module):
@@ -61,6 +62,7 @@ class BilevelActorCritic(nn.Module):
                         act_min,
                         act_max,
                         act_ini,
+                        device,
                         actor_hidden_dims=[256, 256, 256],
                         critic_hidden_dims=[256, 256, 256],
                         activation='elu',
@@ -75,13 +77,24 @@ class BilevelActorCritic(nn.Module):
         mlp_input_dim_a = num_actor_obs
         mlp_input_dim_c = num_critic_obs
 
+        self.mlp_output_dim_a = num_actions
+
         self._mean_target_pos_min = nn.Parameter(torch.tensor(act_min[:2]), requires_grad=False)
         self._mean_target_pos_max = nn.Parameter(torch.tensor(act_max[:2]), requires_grad=False)
+        self._mean_target_pos_off = nn.Parameter(torch.tensor([3.5, 0.0]), requires_grad=False)
 
         self._mean_target_std_min = nn.Parameter(torch.tensor(act_min[2:]), requires_grad=False)
         self._mean_target_std_max = nn.Parameter(torch.tensor(act_max[2:]), requires_grad=False)
         self._mean_target_std_ini = nn.Parameter(torch.tensor(act_ini[2:]), requires_grad=False)
         self._softplus = nn.Softplus()
+
+        # Discrete actor
+        self.num_bins = 5
+        self._trafo_scale = torch.tensor(np.linspace(start=act_min, stop=act_max, num=self.num_bins, axis=-1), dtype=torch.float, device=device)
+        self._trafo_delta = self._trafo_scale[:, 1] - self._trafo_scale[:, 0]
+        self._trafo_loc = 0.0 * torch.tensor(act_min, dtype=torch.float, device=device)
+        self.mlp_output_dim_a = num_actions * self.num_bins
+        self.num_actions = num_actions
         
         # Policy
         actor_layers = []
@@ -91,7 +104,7 @@ class BilevelActorCritic(nn.Module):
         # actor_layers.append(activation)
         for l in range(len(actor_hidden_dims)):
             if l == len(actor_hidden_dims) - 1:
-                actor_layers.append(nn.Linear(actor_hidden_dims[l], num_actions))
+                actor_layers.append(nn.Linear(actor_hidden_dims[l], self.mlp_output_dim_a))
             else:
                 actor_layers.append(nn.Linear(actor_hidden_dims[l], actor_hidden_dims[l + 1]))
                 actor_layers.append(activation)
@@ -139,38 +152,82 @@ class BilevelActorCritic(nn.Module):
     
     @property
     def action_mean(self):
-        return self.distribution.mean
+        # # Gaussian
+        # return self.distribution.mean
+
+        # One-hot Categorical --> weight each option by prob
+        return (self._trafo_scale * self.distribution.probs).sum(dim=-1)
 
     @property
     def action_std(self):
-        return self.distribution.stddev
-    
+        # # Gaussian
+        # return self.distribution.stddev
+
+        # One-hot Categorical --> weight each option by prob
+        return torch.sqrt(((self._trafo_scale - self.action_mean.unsqueeze(dim=-1))**2 * self.distribution.probs).sum(dim=-1))
+
+
     @property
     def entropy(self):
         return self.distribution.entropy().sum(dim=-1)
 
-    def update_distribution(self, observations):
-        mean_raw = self.actor(observations)
-        
-        mean_target_pos = self._mean_target_pos_min + (self._mean_target_pos_max - self._mean_target_pos_min) * 0.5 * (torch.tanh(mean_raw[:, 0:2]) + 1.0)
+    def transform_mean_prediction(self, mean_raw):
 
-        mean_target_std = self._softplus(mean_raw[:, 2:4])
-        mean_target_std = mean_target_std * self._mean_target_std_ini / self._softplus(torch.zeros_like(mean_target_std))
-        mean_target_std = mean_target_std + self._mean_target_std_min
+        mean_target_pos = self._mean_target_pos_min + (self._mean_target_pos_max - self._mean_target_pos_min) * 0.5 * (torch.tanh(mean_raw[:, 0:2]) + 1.0)
+        # mean_target_pos = mean_target_pos + self._mean_target_pos_off
+
+        # mean_target_std = self._softplus(mean_raw[:, 2:4])
+        # mean_target_std = mean_target_std * self._mean_target_std_ini / self._softplus(torch.zeros_like(mean_target_std))
+        # mean_target_std = mean_target_std + self._mean_target_std_min
+        mean_target_std = self._mean_target_std_min + (self._mean_target_std_max - self._mean_target_std_min) * 0.5 * (torch.tanh(mean_raw[:, 2:4]) + 1.0)
 
         mean = torch.concat((mean_target_pos, mean_target_std), dim=-1)
+        return mean
 
-        self.distribution = Normal(mean, mean*0. + self.std)
+    def update_distribution(self, observations):
+        # # Gaussian
+        # mean_raw = self.actor(observations)
+        # mean = self.transform_mean_prediction(mean_raw)
+        # self.distribution = Normal(mean, mean*0. + self.std)
+
+        # One-hot Categorical
+        logits_merged = self.actor(observations)
+        logits = logits_merged.view((*logits_merged.shape[:-1], self.num_actions, self.num_bins))
+        self.distribution = OneHotCategorical(logits=logits)
+        # self.distribution = TransformedDistribution(base_dist, [AffineTransform(scale=self._trafo_scale, loc=self._trafo_loc)])
+
+    def convert_onehot_to_action(self, onehot):
+        return (self._trafo_scale * onehot).sum(dim=-1) + self._trafo_loc
+
+    def convert_action_to_onehot(self, action):
+        return nn.functional.one_hot(((action - self._trafo_scale[:, 0]) / self._trafo_delta).long(), num_classes=self.num_bins)
 
     def act(self, observations, **kwargs):
-        self.update_distribution(observations)
-        return self.distribution.sample()
+        # # Gaussian
+        # self.update_distribution(observations)
+        # return self.distribution.sample()
     
+        # One-hot Categorical
+        self.update_distribution(observations)
+        return self.convert_onehot_to_action(self.distribution.sample())
+
     def get_actions_log_prob(self, actions):
-        return self.distribution.log_prob(actions).sum(dim=-1)
+        # # Gaussian
+        # return self.distribution.log_prob(actions).sum(dim=-1)
+
+        # One-hot Categorical
+        actions_onehot = self.convert_action_to_onehot(actions)
+        return self.distribution.log_prob(actions_onehot).sum(dim=-1)
 
     def act_inference(self, observations):
-        actions_mean = self.actor(observations)
+        # # Gaussian
+        # actions_mean_raw = self.actor(observations)
+        # actions_mean = self.transform_mean_prediction(actions_mean_raw)
+        # return actions_mean
+
+        # One-hot Categorical
+        actions_mean_raw = self.actor(observations)
+        actions_mean = self.transform_mean_prediction(actions_mean_raw)
         return actions_mean
 
     def evaluate(self, critic_observations, **kwargs):

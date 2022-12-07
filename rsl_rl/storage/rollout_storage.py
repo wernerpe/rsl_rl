@@ -50,6 +50,12 @@ class RolloutStorage:
         def clear(self):
             self.__init__()
 
+        def squeeze_single_dims(self):
+            for k in self.__dict__:
+                if k != "hidden_states":
+                    setattr(self, k, getattr(self, k).squeeze(dim=1))
+            return self
+
     def __init__(self, num_envs, num_transitions_per_env, obs_shape, privileged_obs_shape, actions_shape, device='cpu'):
 
         self.device = device
@@ -88,6 +94,9 @@ class RolloutStorage:
     def add_transitions(self, transition: Transition):
         if self.step >= self.num_transitions_per_env:
             raise AssertionError("Rollout buffer overflow")
+
+        # transition = transition.squeeze_single_dims()  # FIXME: accomodate single agent
+
         self.observations[self.step].copy_(transition.observations)
         if self.privileged_observations is not None: self.privileged_observations[self.step].copy_(transition.critic_observations)
         self.actions[self.step].copy_(transition.actions)
@@ -121,6 +130,10 @@ class RolloutStorage:
         self.step = 0
 
     def compute_returns(self, last_values, gamma, lam):
+
+        if len(last_values.shape) > 2:
+            last_values = last_values.squeeze(dim=1)  # FIXME: accomodate single agent
+
         advantage = 0
         for step in reversed(range(self.num_transitions_per_env)):
             if step == self.num_transitions_per_env - 1:

@@ -76,6 +76,7 @@ class BilevelOnPolicyRunner:
                                                         act_min=act_min,
                                                         act_max=act_max,
                                                         act_ini=act_ini,
+                                                        device=device,
                                                         **self.policy_cfg).to(self.device)
         actor_critic_class_ll = eval(self.cfg["policy_class_ll_name"]) # ActorCritic
         actor_critic_ll: ActorCritic = actor_critic_class_ll( self.env.num_obs + self.num_obs_add_ll,
@@ -180,7 +181,7 @@ class BilevelOnPolicyRunner:
                 with torch.inference_mode(): 
                     actions_hl_raw = self.alg_hl.act(obs, critic_obs)
                     self.env.project_into_track_frame(actions_hl_raw)
-                    reward_ep_ll = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+                    reward_ep_ll = torch.zeros(self.env.num_envs, 1, dtype=torch.float, device=self.device)
                     for i_ll in range(self.dt_hl):
                         actions_hl = self.env.update_target_distance_track_frame()
                         obs_ll = torch.concat((obs, actions_hl), dim=-1)
@@ -189,7 +190,7 @@ class BilevelOnPolicyRunner:
                         obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
                         critic_obs = privileged_obs if privileged_obs is not None else obs
                         obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
-                        reward_ep_ll += rewards
+                        reward_ep_ll += rewards  # .squeeze()
 
                         if self.log_dir is not None and train_ll:
                             # Book keeping
