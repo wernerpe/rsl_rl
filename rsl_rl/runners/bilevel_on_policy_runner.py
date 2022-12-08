@@ -63,7 +63,7 @@ class BilevelOnPolicyRunner:
         self.num_obs_add_ll = self.env.num_obs_add_ll
         self.dt_hl = self.env.dt_hl
 
-        self.iter_per_level = 5
+        self.iter_per_level = 100
 
         act_min = self.env.action_min_hl
         act_max = self.env.action_max_hl
@@ -147,6 +147,14 @@ class BilevelOnPolicyRunner:
           return obs, critic_obs
       
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
+
+        iter_per_ll = 200
+        iter_per_hl = 20
+        iter_switch = [0]
+        while iter_switch[-1] < num_learning_iterations:
+            iter_switch.append(iter_switch[-1] + iter_per_ll)
+            iter_switch.append(iter_switch[-1] + iter_per_hl)
+
         # initialize writer
         if self.log_dir is not None and self.writer is None:
             self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
@@ -176,7 +184,8 @@ class BilevelOnPolicyRunner:
         tot_iter = self.current_learning_iteration + num_learning_iterations
         for it in range(self.current_learning_iteration, tot_iter):
 
-            if (it % self.iter_per_level)==0 and it>0:
+            # if (it % self.iter_per_level)==0 and it>0:
+            if it in iter_switch and it > 0:
               train_ll = not train_ll
               train_hl = not train_hl
               obs, critic_obs = self.reset_environment_for_training()
@@ -203,6 +212,8 @@ class BilevelOnPolicyRunner:
                         obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
                         critic_obs = privileged_obs if privileged_obs is not None else obs
                         obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
+                        if rewards.shape[-1]==2:
+                            rewards = rewards[:, 0, 0].unsqueeze(dim=-1).unsqueeze(dim=-1)
                         self.alg_ll.process_env_step(rewards, dones, infos)
                         
                         if self.log_dir is not None:
@@ -254,6 +265,8 @@ class BilevelOnPolicyRunner:
                             obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
                             critic_obs = privileged_obs if privileged_obs is not None else obs
                             obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
+                            if rewards.shape[-1]==2:
+                                rewards = rewards = rewards[:, 0, 0].unsqueeze(dim=-1).unsqueeze(dim=-1)
                             reward_ep_ll += rewards  # .squeeze()
                         
                         self.alg_hl.process_env_step(reward_ep_ll, dones, infos)

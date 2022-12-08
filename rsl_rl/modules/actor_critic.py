@@ -143,8 +143,8 @@ class ActorCritic(nn.Module):
 
     def transform_mean_prediction(self, mean_raw):
       # mean = self._mean_act_min + (self._mean_act_max - self._mean_act_min) * 0.5 * (torch.tanh(mean_raw) + 1.0)
-      # mean = mean_raw
-      mean = 1.3 * torch.tanh(mean_raw)
+      mean = mean_raw
+      # mean = 1.3 * torch.tanh(mean_raw)
       return mean
 
     def update_distribution(self, observations):
