@@ -63,7 +63,7 @@ class BilevelOnPolicyRunner:
         self.num_obs_add_ll = self.env.num_obs_add_ll
         self.dt_hl = self.env.dt_hl
 
-        self.iter_per_level = 10
+        self.iter_per_level = 5
 
         act_min = self.env.action_min_hl
         act_max = self.env.action_max_hl
@@ -115,6 +115,10 @@ class BilevelOnPolicyRunner:
 
         _, _ = self.env.reset()
 
+        # Re-init as reset & step increment total_step via post_physics_step
+        self.env.total_step = 0
+        self.env.episode_length_buf *= 0.0
+
     #     self.policy_ll = self.get_policy_ll(
     #         model_ll_dir='logs/tri_single_blr',
     #         model_ll_run='22_11_25_10_49_54'
@@ -131,7 +135,17 @@ class BilevelOnPolicyRunner:
     #     self.actor_critic_ll.eval() # switch to evaluation mode (dropout for example)
     #     self.actor_critic_ll.to(self.device)
     #     return self.actor_critic_ll.act_inference
-    
+
+    def reset_environment_for_training(self):
+        with torch.inference_mode():
+          _, _ = self.env.reset()
+          self.env.total_step = 0
+          self.env.episode_length_buf *= 0.0
+          obs, privileged_obs = self.env.get_observations(), self.env.get_privileged_observations()
+          critic_obs = privileged_obs if privileged_obs is not None else obs
+          obs, critic_obs = obs.to(self.device), critic_obs.to(self.device)
+          return obs, critic_obs
+      
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # initialize writer
         if self.log_dir is not None and self.writer is None:
@@ -155,44 +169,43 @@ class BilevelOnPolicyRunner:
         cur_reward_sum_ll = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length_ll = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
+        # Start with low-level training
         train_hl = False
         train_ll = True
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
         for it in range(self.current_learning_iteration, tot_iter):
-            start_hl = time.time()
-            start_ll = time.time()
 
             if (it % self.iter_per_level)==0 and it>0:
               train_ll = not train_ll
               train_hl = not train_hl
+              obs, critic_obs = self.reset_environment_for_training()
 
-            if train_hl:
-              self.alg_hl.actor_critic.train()
-              self.alg_ll.actor_critic.eval()
-              self.env.set_train_level(high_level=True)
-            else:
-              self.alg_hl.actor_critic.eval()
-              self.alg_ll.actor_critic.train()
-              self.env.set_train_level(low_level=True)
+            if train_ll:
+                # ### Low-level Training ###
+                self.alg_hl.actor_critic.eval()
+                self.alg_ll.actor_critic.train()
+                self.env.set_train_level(low_level=True)
 
-            # Rollout
-            for i_hl in range(self.num_steps_per_env_hl):
-                with torch.inference_mode(): 
-                    actions_hl_raw = self.alg_hl.act(obs, critic_obs)
-                    self.env.project_into_track_frame(actions_hl_raw)
-                    reward_ep_ll = torch.zeros(self.env.num_envs, 1, dtype=torch.float, device=self.device)
-                    for i_ll in range(self.dt_hl):
-                        actions_hl = self.env.update_target_distance_track_frame()
+                start_ll = time.time()
+                
+                # Rollout
+                with torch.inference_mode():
+                    for i in range(self.num_steps_per_env_ll):
+                        # Sample new HL target at every step and decide whether to update internally
+                        actions_hl_raw = self.alg_hl.act(obs, critic_obs)
+                        actions_hl = self.env.project_into_track_frame(actions_hl_raw)
+
                         obs_ll = torch.concat((obs, actions_hl), dim=-1)
                         critic_obs_ll = torch.concat((critic_obs, actions_hl), dim=-1)
                         actions_ll = self.alg_ll.act(obs_ll, critic_obs_ll)
+
                         obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
                         critic_obs = privileged_obs if privileged_obs is not None else obs
                         obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
-                        reward_ep_ll += rewards  # .squeeze()
-
-                        if self.log_dir is not None and train_ll:
+                        self.alg_ll.process_env_step(rewards, dones, infos)
+                        
+                        if self.log_dir is not None:
                             # Book keeping
                             if 'episode' in infos:
                                 ep_infos.append(infos['episode'])
@@ -204,62 +217,74 @@ class BilevelOnPolicyRunner:
                             cur_reward_sum_ll[new_ids_ll] = 0
                             cur_episode_length_ll[new_ids_ll] = 0
 
-                        if train_ll:
-                            self.alg_ll.process_env_step(rewards, dones, infos)
-                        # elif ((self.env.total_step) % self.dt_hl)==0 and train_hl:
-                        #     break
+                    stop_ll = time.time()
+                    collection_time_ll = stop_ll - start_ll
 
-                    if train_hl:
+                    # Learning step
+                    start_ll = stop_ll
+                    self.alg_ll.compute_returns(critic_obs_ll)
+                
+                mean_value_loss_ll, mean_surrogate_loss_ll = self.alg_ll.update()
+                stop_ll = time.time()
+                learn_time_ll = stop_ll - start_ll
+                if self.log_dir is not None:
+                    self.log(locals(), self.num_steps_per_env_ll, log_ll=True)
+                if it % self.save_interval == 0:
+                    self.save_ll(os.path.join(self.log_dir, 'll_model', 'model_{}.pt'.format(it)))
+                ep_infos.clear()
+
+            else:
+                # ### High-level Training ###
+                self.alg_hl.actor_critic.train()
+                self.alg_ll.actor_critic.eval()
+                self.env.set_train_level(high_level=True)
+
+                start_hl = time.time()
+                
+                # Rollout
+                with torch.inference_mode(): 
+                    for i_hl in range(self.num_steps_per_env_hl):
+                        actions_hl_raw = self.alg_hl.act(obs, critic_obs)
+                        reward_ep_ll = torch.zeros(self.env.num_envs, 1, dtype=torch.float, device=self.device)
+                        for i_ll in range(self.dt_hl):
+                            actions_hl = self.env.project_into_track_frame(actions_hl_raw)
+                            obs_ll = torch.concat((obs, actions_hl), dim=-1)
+                            critic_obs_ll = torch.concat((critic_obs, actions_hl), dim=-1)
+                            actions_ll = self.alg_ll.act(obs_ll, critic_obs_ll)
+                            obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
+                            critic_obs = privileged_obs if privileged_obs is not None else obs
+                            obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
+                            reward_ep_ll += rewards  # .squeeze()
+                        
                         self.alg_hl.process_env_step(reward_ep_ll, dones, infos)
 
-                    if train_ll:
-                      if self.alg_ll.storage.step==self.num_steps_per_env_ll:
-                        stop_ll = time.time()
-                        collection_time_ll = stop_ll - start_ll
-                        start_ll = stop_ll
-                        self.alg_ll.compute_returns(critic_obs_ll)
+                        if self.log_dir is not None:
+                            # Book keeping
+                            if 'episode' in infos:
+                                ep_infos.append(infos['episode'])
+                            cur_reward_sum_hl += reward_ep_ll.squeeze()
+                            cur_episode_length_hl += self.dt_hl
+                            new_ids_hl = (dones > 0).nonzero(as_tuple=False)
+                            rewbuffer_hl.extend(cur_reward_sum_hl[new_ids_hl][:, 0].cpu().numpy().tolist())
+                            lenbuffer_hl.extend(cur_episode_length_hl[new_ids_hl][:, 0].cpu().numpy().tolist())
+                            cur_reward_sum_hl[new_ids_hl] = 0
+                            cur_episode_length_hl[new_ids_hl] = 0
 
-                if train_ll:
-                  if self.alg_ll.storage.step==self.num_steps_per_env_ll:  # FIXME: double check correct episode storage
-                    mean_value_loss_ll, mean_surrogate_loss_ll = self.alg_ll.update()
+                    stop_hl = time.time()
+                    collection_time_hl = stop_hl - start_hl
 
-                    stop_ll = time.time()
-                    learn_time_ll = stop_ll - start_ll
-                    if self.log_dir is not None and train_ll:
-                        self.log(locals(), self.num_steps_per_env_ll, log_ll=True)
-                    ep_infos.clear()
-
-                if self.log_dir is not None and train_hl:
-                    # Book keeping
-                    if 'episode' in infos:
-                        ep_infos.append(infos['episode'])
-                    cur_reward_sum_hl += reward_ep_ll.squeeze()
-                    cur_episode_length_hl += self.dt_hl
-                    new_ids_hl = (dones > 0).nonzero(as_tuple=False)
-                    rewbuffer_hl.extend(cur_reward_sum_hl[new_ids_hl][:, 0].cpu().numpy().tolist())
-                    lenbuffer_hl.extend(cur_episode_length_hl[new_ids_hl][:, 0].cpu().numpy().tolist())
-                    cur_reward_sum_hl[new_ids_hl] = 0
-                    cur_episode_length_hl[new_ids_hl] = 0
-
-            stop_hl = time.time()
-            collection_time_hl = stop_hl - start_hl
-
-            # Learning step
-            start_hl = stop_hl
-            if train_hl:
-              with torch.inference_mode(): 
-                self.alg_hl.compute_returns(critic_obs)
-            
-            if train_hl:
-              mean_value_loss_hl, mean_surrogate_loss_hl = self.alg_hl.update()
-              stop_hl = time.time()
-              learn_time_hl = stop_hl - start_hl
-            if self.log_dir is not None and train_hl:
-                self.log(locals(), self.num_steps_per_env_hl, log_ll=False)
-            if it % self.save_interval == 0:
-                self.save_hl(os.path.join(self.log_dir, 'hl_model', 'model_{}.pt'.format(it)))
-                self.save_ll(os.path.join(self.log_dir, 'll_model', 'model_{}.pt'.format(it)))
-            ep_infos.clear()
+                    # Learning step
+                    start_hl = stop_hl
+                    self.alg_hl.compute_returns(critic_obs)
+                
+                mean_value_loss_hl, mean_surrogate_loss_hl = self.alg_hl.update()
+                stop_hl = time.time()
+                learn_time_hl = stop_hl - start_hl
+                if self.log_dir is not None:
+                    self.log(locals(), self.num_steps_per_env_hl, log_ll=False)
+                if it % self.save_interval == 0:
+                    self.save_hl(os.path.join(self.log_dir, 'hl_model', 'model_{}.pt'.format(it)))
+                ep_infos.clear()
         
         self.current_learning_iteration += num_learning_iterations
         self.save_hl(os.path.join(self.log_dir, 'hl_model', 'model_{}.pt'.format(self.current_learning_iteration)))
