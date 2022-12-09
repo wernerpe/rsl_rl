@@ -53,7 +53,8 @@ class BilevelRolloutStorage:
         def squeeze_single_dims(self):
             for k in self.__dict__:
                 if k != "hidden_states":
-                    setattr(self, k, getattr(self, k).squeeze(dim=1))
+                    # setattr(self, k, getattr(self, k).squeeze(dim=1))
+                    setattr(self, k, getattr(self, k)[:, 0])
             return self
 
     def __init__(self, num_envs, num_transitions_per_env, obs_shape, privileged_obs_shape, actions_shape, device='cpu'):
@@ -129,7 +130,8 @@ class BilevelRolloutStorage:
     def compute_returns(self, last_values, gamma, lam):
 
         if len(last_values.shape) > 2:
-            last_values = last_values.squeeze(dim=1)  # FIXME: accomodate single agent
+            # last_values = last_values.squeeze(dim=1)  # FIXME: accomodate single agent
+            last_values = last_values[:, 0]  # FIXME: accomodate single agent
             
         advantage = 0
         for step in reversed(range(self.num_transitions_per_env)):

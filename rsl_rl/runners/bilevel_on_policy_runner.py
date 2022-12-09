@@ -203,11 +203,13 @@ class BilevelOnPolicyRunner:
                     for i in range(self.num_steps_per_env_ll):
                         # Sample new HL target at every step and decide whether to update internally
                         actions_hl_raw = self.alg_hl.act(obs, critic_obs)
+                        self.env.set_hl_action_probs(self.alg_hl.actor_critic.distribution.probs)
                         actions_hl = self.env.project_into_track_frame(actions_hl_raw)
 
                         obs_ll = torch.concat((obs, actions_hl), dim=-1)
                         critic_obs_ll = torch.concat((critic_obs, actions_hl), dim=-1)
                         actions_ll = self.alg_ll.act(obs_ll, critic_obs_ll)
+                        self.env.set_ll_action_stats(self.alg_ll.actor_critic.action_mean, self.alg_ll.actor_critic.action_std)
 
                         obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
                         critic_obs = privileged_obs if privileged_obs is not None else obs
@@ -256,17 +258,19 @@ class BilevelOnPolicyRunner:
                 with torch.inference_mode(): 
                     for i_hl in range(self.num_steps_per_env_hl):
                         actions_hl_raw = self.alg_hl.act(obs, critic_obs)
-                        reward_ep_ll = torch.zeros(self.env.num_envs, 1, dtype=torch.float, device=self.device)
+                        self.env.set_hl_action_probs(self.alg_hl.actor_critic.distribution.probs)
+                        reward_ep_ll = torch.zeros(self.env.num_envs, 1, 1, dtype=torch.float, device=self.device)
                         for i_ll in range(self.dt_hl):
                             actions_hl = self.env.project_into_track_frame(actions_hl_raw)
                             obs_ll = torch.concat((obs, actions_hl), dim=-1)
                             critic_obs_ll = torch.concat((critic_obs, actions_hl), dim=-1)
                             actions_ll = self.alg_ll.act(obs_ll, critic_obs_ll)
+                            self.env.set_ll_action_stats(self.alg_ll.actor_critic.action_mean, self.alg_ll.actor_critic.action_std)
                             obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
                             critic_obs = privileged_obs if privileged_obs is not None else obs
                             obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
                             if rewards.shape[-1]==2:
-                                rewards = rewards = rewards[:, 0, 0].unsqueeze(dim=-1).unsqueeze(dim=-1)
+                                rewards = rewards[:, 0, 0].unsqueeze(dim=-1).unsqueeze(dim=-1)
                             reward_ep_ll += rewards  # .squeeze()
                         
                         self.alg_hl.process_env_step(reward_ep_ll, dones, infos)

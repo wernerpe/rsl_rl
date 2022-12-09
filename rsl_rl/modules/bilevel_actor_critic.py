@@ -193,6 +193,15 @@ class BilevelActorCritic(nn.Module):
         # One-hot Categorical
         logits_merged = self.actor(observations)
         logits = logits_merged.view((*logits_merged.shape[:-1], self.num_actions, self.num_bins))
+
+        # Add epsilon-greedy probabilities
+        epsilon = 0.1
+        damping = 1e-3
+        probs = torch.exp(logits) / (1.0 + torch.exp(logits))
+        probs = probs / probs.sum(dim=-1).unsqueeze(dim=-1)
+        probs = (1.0 - epsilon) * probs + epsilon * torch.ones_like(probs) / probs.shape[-1]
+        logits = torch.log(probs / (1.0 - probs + damping))
+
         self.distribution = OneHotCategorical(logits=logits)
         # self.distribution = TransformedDistribution(base_dist, [AffineTransform(scale=self._trafo_scale, loc=self._trafo_loc)])
 

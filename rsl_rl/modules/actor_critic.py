@@ -72,8 +72,8 @@ class ActorCritic(nn.Module):
         mlp_input_dim_a = num_actor_obs
         mlp_input_dim_c = num_critic_obs
 
-        # self._mean_act_min = nn.Parameter(1.1 * torch.tensor([-0.35, -1.0]), requires_grad=False)
-        # self._mean_act_max = nn.Parameter(1.1 * torch.tensor([+0.35, +1.0]), requires_grad=False)
+        self._mean_act_min = nn.Parameter(torch.tensor([-0.35, -1.0]), requires_grad=False)
+        self._mean_act_max = nn.Parameter(torch.tensor([+0.35, +1.0]), requires_grad=False)
 
         # Policy
         actor_layers = []
@@ -142,15 +142,16 @@ class ActorCritic(nn.Module):
         return self.distribution.entropy().sum(dim=-1)
 
     def transform_mean_prediction(self, mean_raw):
-      # mean = self._mean_act_min + (self._mean_act_max - self._mean_act_min) * 0.5 * (torch.tanh(mean_raw) + 1.0)
-      mean = mean_raw
-      # mean = 1.3 * torch.tanh(mean_raw)
-      return mean
+        # mean = self._mean_act_min + (self._mean_act_max - self._mean_act_min) * 0.5 * (torch.tanh(mean_raw) + 1.0)
+        # mean = mean_raw
+        mean = 1.3 * torch.tanh(mean_raw)
+        return mean
 
     def update_distribution(self, observations):
         mean_raw = self.actor(observations)
 
         mean = self.transform_mean_prediction(mean_raw)
+        # stdv = self.std * (self._mean_act_max - self._mean_act_min)
 
         self.distribution = Normal(mean, mean*0. + self.std)
 
