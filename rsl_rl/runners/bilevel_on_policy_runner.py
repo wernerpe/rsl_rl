@@ -449,7 +449,11 @@ class BilevelOnPolicyRunner:
             self.alg_ll.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
         self.current_learning_iteration = loaded_dict['iter']
         return loaded_dict['infos']
-
+    
+    def load(self, path_ll, path_hl, load_optimizer = True):
+        self.load_ll(path_ll, load_optimizer= load_optimizer)
+        self.load_hl(path_hl, load_optimizer= load_optimizer)
+        
     def get_inference_policy_hl(self, device=None):
         self.alg_hl.actor_critic.eval() # switch to evaluation mode (dropout for example)
         if device is not None:

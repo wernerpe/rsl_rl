@@ -238,7 +238,6 @@ class MAOnPolicyRunner:
             self.writer.add_scalar('Train/mean_team_reward/time', statistics.mean(locs['trewbuffer']), self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
 
-
         string = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
 
         if len(locs['rewbuffer']) > 0:
