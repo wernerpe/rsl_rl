@@ -237,7 +237,7 @@ class BilevelOnPolicyRunner:
                     start_ll = stop_ll
                     self.alg_ll.compute_returns(critic_obs_ll)
                 
-                mean_value_loss_ll, mean_surrogate_loss_ll = self.alg_ll.update()
+                mean_value_loss_ll, mean_surrogate_loss_ll, mean_entropy_loss_ll = self.alg_ll.update()
                 stop_ll = time.time()
                 learn_time_ll = stop_ll - start_ll
                 if self.log_dir is not None:
@@ -294,7 +294,7 @@ class BilevelOnPolicyRunner:
                     start_hl = stop_hl
                     self.alg_hl.compute_returns(critic_obs)
                 
-                mean_value_loss_hl, mean_surrogate_loss_hl = self.alg_hl.update()
+                mean_value_loss_hl, mean_surrogate_loss_hl, mean_entropy_loss_hl = self.alg_hl.update()
                 stop_hl = time.time()
                 learn_time_hl = stop_hl - start_hl
                 if self.log_dir is not None:
@@ -337,6 +337,7 @@ class BilevelOnPolicyRunner:
         if not log_ll:
           self.writer.add_scalar('Loss/value_function_hl', locs['mean_value_loss_hl'], locs['it'])
           self.writer.add_scalar('Loss/surrogate_hl', locs['mean_surrogate_loss_hl'], locs['it'])
+          self.writer.add_scalar('Loss/entropy_hl', locs['mean_entropy_loss_hl'], locs['it'])
           self.writer.add_scalar('Loss/learning_rate_hl', self.alg_hl.learning_rate, locs['it'])
           self.writer.add_scalar('Policy/mean_noise_std_hl', mean_std_hl.item(), locs['it'])
           self.writer.add_scalar('Perf/collection time_hl', locs['collection_time_hl'], locs['it'])
@@ -344,6 +345,7 @@ class BilevelOnPolicyRunner:
         else:
           self.writer.add_scalar('Loss/value_function_ll', locs['mean_value_loss_ll'], locs['it'])
           self.writer.add_scalar('Loss/surrogate_ll', locs['mean_surrogate_loss_ll'], locs['it'])
+          self.writer.add_scalar('Loss/entropy_ll', locs['mean_entropy_loss_ll'], locs['it'])
           self.writer.add_scalar('Loss/learning_rate_ll', self.alg_ll.learning_rate, locs['it'])
           self.writer.add_scalar('Policy/mean_noise_std_ll', mean_std_ll.item(), locs['it'])
           self.writer.add_scalar('Perf/collection time_ll', locs['collection_time_ll'], locs['it'])
@@ -370,6 +372,7 @@ class BilevelOnPolicyRunner:
                               'collection_time_hl']:.3f}s, learning {locs['learn_time_hl']:.3f}s)\n"""
                             f"""{'HL Value function loss:':>{pad}} {locs['mean_value_loss_hl']:.4f}\n"""
                             f"""{'HL Surrogate loss:':>{pad}} {locs['mean_surrogate_loss_hl']:.4f}\n"""
+                            f"""{'HL Entropy loss:':>{pad}} {locs['mean_entropy_loss_hl']:.4f}\n"""
                             f"""{'HL Mean action noise std:':>{pad}} {mean_std_hl.item():.2f}\n"""
                             f"""{'HL Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer_hl']):.2f}\n"""
                             f"""{'HL Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer_hl']):.2f}\n""")
@@ -382,6 +385,7 @@ class BilevelOnPolicyRunner:
                               'collection_time_hl']:.3f}s, learning {locs['learn_time_hl']:.3f}s)\n"""
                             f"""{'HL Value function loss:':>{pad}} {locs['mean_value_loss_hl']:.4f}\n"""
                             f"""{'HL Surrogate loss:':>{pad}} {locs['mean_surrogate_loss_hl']:.4f}\n"""
+                            f"""{'HL Entropy loss:':>{pad}} {locs['mean_entropy_loss_hl']:.4f}\n"""
                             f"""{'HL Mean action noise std:':>{pad}} {mean_std_hl.item():.2f}\n""")
                           #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
                           #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
@@ -393,6 +397,7 @@ class BilevelOnPolicyRunner:
                               'collection_time_ll']:.3f}s, learning {locs['learn_time_ll']:.3f}s)\n"""
                             f"""{'LL Value function loss:':>{pad}} {locs['mean_value_loss_ll']:.4f}\n"""
                             f"""{'LL Surrogate loss:':>{pad}} {locs['mean_surrogate_loss_ll']:.4f}\n"""
+                            f"""{'LL Entropy loss:':>{pad}} {locs['mean_entropy_loss_ll']:.4f}\n"""
                             f"""{'LL Mean action noise std:':>{pad}} {mean_std_ll.item():.2f}\n"""
                             f"""{'LL Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer_ll']):.2f}\n"""
                             f"""{'LL Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer_ll']):.2f}\n""")
@@ -405,6 +410,7 @@ class BilevelOnPolicyRunner:
                               'collection_time_ll']:.3f}s, learning {locs['learn_time_ll']:.3f}s)\n"""
                             f"""{'LL Value function loss:':>{pad}} {locs['mean_value_loss_ll']:.4f}\n"""
                             f"""{'LL Surrogate loss:':>{pad}} {locs['mean_surrogate_loss_ll']:.4f}\n"""
+                            f"""{'LL Entropy loss:':>{pad}} {locs['mean_entropy_loss_ll']:.4f}\n"""
                             f"""{'LL Mean action noise std:':>{pad}} {mean_std_ll.item():.2f}\n""")
                           #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
                           #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
