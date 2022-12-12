@@ -64,6 +64,8 @@ class BilevelOnPolicyRunner:
         self.dt_hl = self.env.dt_hl
 
         self.iter_per_level = 100
+        self.iter_per_hl = self.cfg["iter_per_hl"]
+        self.iter_per_ll = self.cfg["iter_per_ll"]
 
         act_min = self.env.action_min_hl
         act_max = self.env.action_max_hl
@@ -148,8 +150,8 @@ class BilevelOnPolicyRunner:
       
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
 
-        iter_per_ll = 200
-        iter_per_hl = 20
+        iter_per_ll = self.iter_per_ll  # 200
+        iter_per_hl = self.iter_per_hl  # 20
         iter_switch = [0]
         while iter_switch[-1] < num_learning_iterations:
             iter_switch.append(iter_switch[-1] + iter_per_ll)

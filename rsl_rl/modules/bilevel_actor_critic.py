@@ -235,9 +235,10 @@ class BilevelActorCritic(nn.Module):
         # return actions_mean
 
         # One-hot Categorical
-        actions_mean_raw = self.actor(observations)
-        actions_mean = self.transform_mean_prediction(actions_mean_raw)
-        return actions_mean
+        logits_merged = self.actor(observations)
+        logits = logits_merged.view((*logits_merged.shape[:-1], self.num_actions, self.num_bins))
+        actions_onehot = 1.0 * (logits==logits.max(dim=-1)[0].unsqueeze(-1))
+        return self.convert_onehot_to_action(actions_onehot)
 
     def evaluate(self, critic_observations, **kwargs):
         value = self.critic(critic_observations)
