@@ -36,6 +36,9 @@ from torch.distributions import Normal
 from torch.distributions import OneHotCategorical, TransformedDistribution, AffineTransform
 from torch.nn.modules import rnn
 
+# from rsl_rl.modules.attention.encoders import EncoderAttention4
+
+
 class Actor(nn.Module):
     def __init__(self,  num_actor_obs,
                         num_actions,
@@ -54,12 +57,16 @@ class StrucutredCritic(nn.Module):
         pass
 
 
-class BilevelActorCritic(nn.Module):
+class BilevelActorCriticAttention(nn.Module):
     is_recurrent = False
     def __init__(self,  num_actor_obs,
                         num_critic_obs,
+                        num_add_obs,
                         num_actions,
+                        # num_agents,
                         device,
+                        encoder,
+                        train_encoder=False,
                         act_min=None,
                         act_max=None,
                         act_ini=None,
@@ -68,17 +75,45 @@ class BilevelActorCritic(nn.Module):
                         critic_hidden_dims=[256, 256, 256],
                         activation='elu',
                         init_noise_std=1.0,
+                        critic_output_dim=1,
                         **kwargs):
         if kwargs:
             print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
-        super(BilevelActorCritic, self).__init__()
+        super(BilevelActorCriticAttention, self).__init__()
 
         activation = get_activation(activation)
 
-        mlp_input_dim_a = num_actor_obs
-        mlp_input_dim_c = num_critic_obs
+        encoder_type = kwargs['encoder_type']
+        encoder_hidden_dims = kwargs['encoder_hidden_dims']
+
+        # teamsize = kwargs['teamsize']
+        # numteams = kwargs['numteams']
+
+        num_ego_obs = kwargs['num_ego_obs']
+        num_ado_obs = kwargs['num_ado_obs']
+
+        self.n_critics = kwargs['numcritics']
+        self.is_attentive = kwargs['attentive']
+
+        # num_agent_max = num_agents
+        num_ego_obs = num_ego_obs
+        num_ado_obs = num_ado_obs
+        if encoder_type != 'attention4':
+            mlp_input_dim_a = num_ego_obs + 1*num_ado_obs
+            mlp_input_dim_c = num_ego_obs + 1*num_ado_obs
+        else:
+            mlp_input_dim_a = num_ego_obs + encoder_hidden_dims[-1]
+            mlp_input_dim_c = num_ego_obs + encoder_hidden_dims[-1]
+
+        mlp_input_dim_a += num_add_obs
+        mlp_input_dim_c += num_add_obs
+
+        enc_split_dim = num_actor_obs
 
         self.mlp_output_dim_a = num_actions
+
+        # # Encoder
+        # self.encoder = encoder
 
         self.use_discrete_policy = discrete
         self.use_output_mapping = (act_min and act_max and act_ini) is not None
@@ -104,35 +139,28 @@ class BilevelActorCritic(nn.Module):
                 self._softplus = nn.Softplus()
         
         # Policy
-        actor_layers = []
-        actor_layers.append(nn.Linear(mlp_input_dim_a, actor_hidden_dims[0]))
-        actor_layers.append(nn.LayerNorm(actor_hidden_dims[0]))
-        actor_layers.append(nn.Tanh())
-        # actor_layers.append(activation)
-        for l in range(len(actor_hidden_dims)):
-            if l == len(actor_hidden_dims) - 1:
-                actor_layers.append(nn.Linear(actor_hidden_dims[l], self.mlp_output_dim_a))
-            else:
-                actor_layers.append(nn.Linear(actor_hidden_dims[l], actor_hidden_dims[l + 1]))
-                actor_layers.append(activation)
-        self.actor = nn.Sequential(*actor_layers)
-
+        self.actor = ActorAttention(
+            input_dim=mlp_input_dim_a, 
+            hidden_dims=actor_hidden_dims, 
+            split_dim=enc_split_dim,
+            output_dim=self.mlp_output_dim_a, 
+            activation=activation,
+            encoder=encoder,
+            train_encoder=False,
+        )
         # Value function
-        critic_layers = []
-        critic_layers.append(nn.Linear(mlp_input_dim_c, critic_hidden_dims[0]))
-        critic_layers.append(nn.LayerNorm(critic_hidden_dims[0]))
-        critic_layers.append(nn.Tanh())
-        # critic_layers.append(activation)
-        for l in range(len(critic_hidden_dims)):
-            if l == len(critic_hidden_dims) - 1:
-                critic_layers.append(nn.Linear(critic_hidden_dims[l], 1))
-            else:
-                critic_layers.append(nn.Linear(critic_hidden_dims[l], critic_hidden_dims[l + 1]))
-                critic_layers.append(activation)
-        self.critic = nn.Sequential(*critic_layers)
+        self.critics = nn.ModuleList([CriticAttention(
+          input_dim=mlp_input_dim_c, 
+          hidden_dims=critic_hidden_dims, 
+          split_dim=enc_split_dim,
+          output_dims=critic_output_dim,
+          activation=activation,
+          encoder=encoder,
+          train_encoder=train_encoder,
+        ) for _ in range(self.n_critics)])
 
         print(f"Actor MLP: {self.actor}")
-        print(f"Critic MLP: {self.critic}")
+        print(f"Critic MLP: {self.critics[0]}")
 
         # Action noise
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
@@ -250,7 +278,7 @@ class BilevelActorCritic(nn.Module):
 
     def update_distribution_and_get_actions_log_prob_mu_sigma_entropy(self, observations, actions):
         self.update_distribution(observations)
-        return self.get_actions_log_prob(actions), self.distribution.mean, torch.sqrt(self.distribution.variance), self.entropy
+        return self.get_actions_log_prob(actions), self.action_mean, self.action_std, self.entropy
 
     def act_inference(self, observations):
   
@@ -267,8 +295,81 @@ class BilevelActorCritic(nn.Module):
             return actions_mean
 
     def evaluate(self, critic_observations, **kwargs):
-        value = self.critic(critic_observations)
-        return value
+        # value = self.critic(critic_observations)
+        # return value
+        values = [critic(critic_observations) for critic in self.critics]
+        return torch.stack(values, dim=1)
+        # return torch.concat(values, dim=1)  # FIXME: check if right
+
+
+class ActorAttention(nn.Module):
+  
+    def __init__(self, input_dim, hidden_dims, split_dim, output_dim, activation, encoder, train_encoder=False):
+
+        super(ActorAttention, self).__init__()
+
+        self.split_dim = split_dim
+
+        self._encoder = encoder
+        self._train_encoder = train_encoder
+
+        actor_layers = []
+        actor_layers.append(nn.Linear(input_dim, hidden_dims[0]))
+        actor_layers.append(nn.LayerNorm(hidden_dims[0]))
+        actor_layers.append(nn.Tanh())
+        # actor_layers.append(activation)
+        for l in range(len(hidden_dims)):
+            if l == len(hidden_dims) - 1:
+                actor_layers.append(nn.Linear(hidden_dims[l], output_dim))
+            else:
+                actor_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
+                actor_layers.append(activation)
+        self._network = nn.Sequential(*actor_layers)
+
+    def forward(self, observations):
+        # split obs, don't encode target
+        obs1 = observations[..., :self.split_dim]
+        obs2 = observations[..., self.split_dim:]
+        latent = self._encoder(obs1)
+        if not self._train_encoder:
+            latent = latent.detach()
+        obs = torch.concat((latent, obs2), dim=-1)
+        return self._network(obs)
+
+
+class CriticAttention(nn.Module):
+  
+    def __init__(self, input_dim, hidden_dims, split_dim, activation, encoder, output_dims=1, train_encoder=False):
+
+        super(CriticAttention, self).__init__()
+
+        self.split_dim = split_dim
+
+        self._encoder = encoder
+        self._train_encoder = train_encoder
+  
+        critic_layers = []
+        critic_layers.append(nn.Linear(input_dim, hidden_dims[0]))
+        critic_layers.append(nn.LayerNorm(hidden_dims[0]))
+        critic_layers.append(nn.Tanh())
+        for l in range(len(hidden_dims)):
+            if l == len(hidden_dims) - 1:
+                critic_layers.append(nn.Linear(hidden_dims[l], output_dims))
+            else:
+                critic_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
+                critic_layers.append(activation)
+        self._network = nn.Sequential(*critic_layers)
+
+    def forward(self, observations):
+        # split obs, don't encode target
+        obs1 = observations[..., :self.split_dim]
+        obs2 = observations[..., self.split_dim:]
+        latent = self._encoder(obs1)
+        if not self._train_encoder:
+            latent = latent.detach()
+        obs = torch.concat((latent, obs2), dim=-1)
+        return self._network(obs)
+
 
 def get_activation(act_name):
     if act_name == "elu":

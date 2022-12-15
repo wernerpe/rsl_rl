@@ -67,14 +67,14 @@ class BilevelPPO:
         self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
         self.transition = BilevelRolloutStorage.Transition()
 
-        self._actions_min = torch.concat((
-          self.actor_critic._mean_target_pos_min,
-          self.actor_critic._mean_target_std_min
-          ), dim=-1)
-        self._actions_max = torch.concat((
-          self.actor_critic._mean_target_pos_max,
-          self.actor_critic._mean_target_std_max
-          ), dim=-1)
+        # self._actions_min = torch.concat((
+        #   self.actor_critic._mean_target_pos_min,
+        #   self.actor_critic._mean_target_std_min
+        #   ), dim=-1)
+        # self._actions_max = torch.concat((
+        #   self.actor_critic._mean_target_pos_max,
+        #   self.actor_critic._mean_target_std_max
+        #   ), dim=-1)
 
         # PPO parameters
         self.clip_param = clip_param
@@ -96,14 +96,14 @@ class BilevelPPO:
     def train_mode(self):
         self.actor_critic.train()
 
-    def clip_actions(self, actions):
-      return torch.clamp(actions, min=self._actions_min, max=self._actions_max)
+    # def clip_actions(self, actions):
+    #   return torch.clamp(actions, min=self._actions_min, max=self._actions_max)
 
     def act(self, obs, critic_obs):
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
         # Compute the actions and values
-        self.transition.actions = self.clip_actions(self.actor_critic.act(obs).detach())
+        self.transition.actions = self.actor_critic.act(obs).detach()  # self.clip_actions(self.actor_critic.act(obs).detach())
         self.transition.values = self.actor_critic.evaluate(critic_obs).detach()
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()

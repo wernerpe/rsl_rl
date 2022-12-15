@@ -34,3 +34,5 @@ from .actor_critic_attention import ActorCriticAttention#, ActorAttention, Criti
 from .multi_agent_actor_critic import MAActorCritic, CMAActorCritic, MultiTeamCMAAC
 from .hierarchical_actor_critic import HierarchicalActorCritic
 from .bilevel_actor_critic import BilevelActorCritic
+from .bilevel_actor_critic_attention import BilevelActorCriticAttention
+from .bima_actor_critic import MultiTeamBilevelActorCritic, TeamBilevelActorCritic

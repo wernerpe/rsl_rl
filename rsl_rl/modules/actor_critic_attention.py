@@ -35,7 +35,7 @@ import torch.nn as nn
 from torch.distributions import Normal
 from torch.nn.modules import rnn
 
-from rsl_rl.modules.attention.encoders import EncoderAttention1, EncoderAttention2, EncoderAttention3, EncoderAttention4
+from rsl_rl.attention.encoders import EncoderAttention1, EncoderAttention2, EncoderAttention3, EncoderAttention4
 
 
 class ActorCriticAttention(nn.Module):

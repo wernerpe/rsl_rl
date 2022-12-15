@@ -241,3 +241,15 @@ class EncoderAttention4(nn.Module):
       if multi_ego:
         new_obs = new_obs.view(*obs_shape[:2], -1)
       return new_obs
+
+
+def get_encoder(num_ego_obs, num_ado_obs, hidden_dims, teamsize, numteams, activation='elu'):
+    return EncoderAttention4(
+      num_ego_obs=num_ego_obs, 
+      num_ado_obs=num_ado_obs, 
+      hidden_dims=hidden_dims, 
+      output_dim=num_ado_obs, 
+      numteams=numteams, 
+      teamsize=teamsize,
+      activation=activation
+    )

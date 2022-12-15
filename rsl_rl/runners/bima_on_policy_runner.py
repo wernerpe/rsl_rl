@@ -36,19 +36,25 @@ import statistics
 from torch.utils.tensorboard import SummaryWriter
 import torch
 
-from rsl_rl.algorithms import PPO, BilevelPPO
-from rsl_rl.modules import ActorCritic, ActorCriticRecurrent, BilevelActorCritic
+from rsl_rl.algorithms import BimaPPO
+# from rsl_rl.modules import BilevelActorCriticAttention, get_encoder
+from rsl_rl.attention import get_encoder
+from rsl_rl.modules import MultiTeamBilevelActorCritic, TeamBilevelActorCritic
 from rsl_rl.env import VecEnv
 
+import yaml
+import os
 
-class BilevelOnPolicyRunner:
+
+class BimaOnPolicyRunner:
 
     def __init__(self,
                  env: VecEnv,
                  train_cfg,
                  log_dir=None,
-                 device='cpu'):
-
+                 device='cpu',
+                 num_agents=2):
+        self.train_cfg = train_cfg
         self.cfg=train_cfg["runner"]
         self.alg_cfg = train_cfg["algorithm"]
         self.policy_cfg = train_cfg["policy"]
@@ -71,10 +77,32 @@ class BilevelOnPolicyRunner:
         act_max = self.env.action_max_hl
         act_ini = self.env.action_ini_hl
 
+        encoder_type = self.policy_cfg['encoder_type']
+        encoder_hidden_dims = self.policy_cfg['encoder_hidden_dims']
+
+        teamsize = self.policy_cfg['teamsize']
+        numteams = self.policy_cfg['numteams']
+        self.num_agents = teamsize * numteams
+
+        # num_ego_obs = self.policy_cfg['num_ego_obs']
+        # num_ado_obs = self.policy_cfg['num_ado_obs']
+
+        encoder = get_encoder(
+            num_ego_obs=self.policy_cfg['num_ego_obs'], 
+            num_ado_obs=self.policy_cfg['num_ado_obs'], 
+            hidden_dims=encoder_hidden_dims, 
+            teamsize=teamsize,
+            numteams=numteams,
+        )
+
         actor_critic_class_hl = eval(self.cfg["policy_class_hl_name"]) # BilevelActorCritic
-        actor_critic_hl: BilevelActorCritic = actor_critic_class_hl( self.env.num_obs,
-                                                        num_critic_obs,
-                                                        self.num_actions_hl,
+        actor_critic_hl: MultiTeamBilevelActorCritic = actor_critic_class_hl(
+                                                        num_actor_obs=self.env.num_obs,
+                                                        num_critic_obs=num_critic_obs,
+                                                        num_add_obs=0,
+                                                        num_actions=self.num_actions_hl,
+                                                        encoder=encoder,
+                                                        train_encoder=False,
                                                         act_min=act_min,
                                                         act_max=act_max,
                                                         act_ini=act_ini,
@@ -82,15 +110,19 @@ class BilevelOnPolicyRunner:
                                                         discrete=True,
                                                         **self.policy_cfg).to(self.device)
         actor_critic_class_ll = eval(self.cfg["policy_class_ll_name"]) # ActorCritic
-        actor_critic_ll: BilevelActorCritic = actor_critic_class_ll( self.env.num_obs + self.num_obs_add_ll,
-                                                        num_critic_obs + self.num_obs_add_ll,  # target_pos, target_std, ll_steps
-                                                        self.env.num_actions,
+        actor_critic_ll: MultiTeamBilevelActorCritic = actor_critic_class_ll(
+                                                        num_actor_obs=self.env.num_obs,
+                                                        num_critic_obs=num_critic_obs,
+                                                        num_add_obs=self.num_obs_add_ll,
+                                                        num_actions=self.env.num_actions,
+                                                        encoder=encoder,
+                                                        train_encoder=True,
                                                         device=device,
                                                         **self.policy_cfg).to(self.device)
         alg_class_hl = eval(self.cfg["algorithm_class_hl_name"]) # BilevelPPO
-        self.alg_hl: BilevelPPO = alg_class_hl(actor_critic_hl, device=self.device, **self.alg_cfg)
+        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, device=self.device, **self.alg_cfg)
         alg_class_ll = eval(self.cfg["algorithm_class_ll_name"]) # PPO
-        self.alg_ll: BilevelPPO = alg_class_ll(actor_critic_ll, device=self.device, **self.alg_cfg)
+        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, device=self.device, **self.alg_cfg)
 
         self.num_steps_per_env_hl = self.cfg["num_steps_per_env_hl"]
         self.num_steps_per_env_ll = self.cfg["num_steps_per_env_ll"]
@@ -99,19 +131,22 @@ class BilevelOnPolicyRunner:
 
         self.save_interval = self.cfg["save_interval"]
 
+        self.population_update_interval = self.cfg["population_update_interval"]
+
         # init storage and model
-        self.alg_hl.init_storage(self.env.num_envs, self.num_steps_per_env_hl, [self.env.num_obs], [self.env.num_privileged_obs], [self.num_actions_hl])
+        self.alg_hl.init_storage(self.env.num_envs, self.num_steps_per_env_hl, [self.env.num_obs], [self.env.num_privileged_obs], [self.num_actions_hl], teamsize)
         if self.env.num_privileged_obs is None:
             num_privileged_obs_ll = self.env.num_privileged_obs
         else:
             num_privileged_obs_ll = self.env.num_privileged_obs + self.num_obs_add_ll
-        self.alg_ll.init_storage(self.env.num_envs, self.num_steps_per_env_ll, [self.env.num_obs + self.num_obs_add_ll], [num_privileged_obs_ll], [self.env.num_actions])
+        self.alg_ll.init_storage(self.env.num_envs, self.num_steps_per_env_ll, [self.env.num_obs + self.num_obs_add_ll], [num_privileged_obs_ll], [self.env.num_actions], teamsize)
 
         # Log
         self.log_dir = log_dir
         if log_dir is not None:
           os.makedirs(self.log_dir + '/hl_model', exist_ok=True)
           os.makedirs(self.log_dir + '/ll_model', exist_ok=True)
+        self.track_cfg = train_cfg['track_cfgs']
         self.writer = None
         self.tot_timesteps = 0
         self.tot_time = 0
@@ -123,22 +158,12 @@ class BilevelOnPolicyRunner:
         self.env.total_step = 0
         self.env.episode_length_buf *= 0.0
 
-    #     self.policy_ll = self.get_policy_ll(
-    #         model_ll_dir='logs/tri_single_blr',
-    #         model_ll_run='22_11_25_10_49_54'
-    #     )
-
-    # def get_policy_ll(self, model_ll_dir, model_ll_run):
-    #     from dmaracing.utils.helpers import get_run
-
-    #     dir, model = get_run(model_ll_dir, run=model_ll_run, chkpt=-1)
-    #     model_path = "{}/model_{}.pt".format(dir, model)
-    #     print("Loading model" + model_path)
-    #     loaded_dict = torch.load(model_path)
-    #     self.actor_critic_ll.load_state_dict(state_dict=loaded_dict['model_state_dict'])
-    #     self.actor_critic_ll.eval() # switch to evaluation mode (dropout for example)
-    #     self.actor_critic_ll.to(self.device)
-    #     return self.actor_critic_ll.act_inference
+    def store_cfgs(self,):
+                with open(self.log_dir + '/cfg_train.yml', 'w') as outfile:
+                    yaml.dump(self.train_cfg, outfile, default_flow_style=False)
+                    
+                with open(self.log_dir + '/cfg.yml', 'w') as outfile:
+                    yaml.dump(self.env.cfg, outfile, default_flow_style=False)
 
     def reset_environment_for_training(self):
         with torch.inference_mode():
@@ -162,6 +187,8 @@ class BilevelOnPolicyRunner:
         # initialize writer
         if self.log_dir is not None and self.writer is None:
             self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
+            if self.track_cfg:
+                self.store_cfgs()
         if init_at_random_ep_len:
             self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
         obs = self.env.get_observations()
@@ -173,12 +200,16 @@ class BilevelOnPolicyRunner:
 
         ep_infos = []
         rewbuffer_hl = deque(maxlen=100)
+        trewbuffer_hl = deque(maxlen=100)
         lenbuffer_hl = deque(maxlen=100)
-        cur_reward_sum_hl = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_mean_reward_sum_hl = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_mean_team_reward_sum_hl = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length_hl = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         rewbuffer_ll = deque(maxlen=100)
+        trewbuffer_ll = deque(maxlen=100)
         lenbuffer_ll = deque(maxlen=100)
-        cur_reward_sum_ll = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_mean_reward_sum_ll = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_mean_team_reward_sum_ll = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length_ll = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
         # Start with low-level training
@@ -207,7 +238,7 @@ class BilevelOnPolicyRunner:
                     for i in range(self.num_steps_per_env_ll):
                         # Sample new HL target at every step and decide whether to update internally
                         actions_hl_raw = self.alg_hl.act(obs, critic_obs)
-                        self.env.set_hl_action_probs(self.alg_hl.actor_critic.distribution.probs)
+                        self.env.set_hl_action_probs(self.alg_hl.actor_critic.action_probs)
                         actions_hl = self.env.project_into_track_frame(actions_hl_raw)
 
                         obs_ll = torch.concat((obs, actions_hl), dim=-1)
@@ -219,20 +250,25 @@ class BilevelOnPolicyRunner:
                         critic_obs = privileged_obs if privileged_obs is not None else obs
                         obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
                         if rewards.shape[-1]==2:
-                            rewards = rewards[:, 0, 0].unsqueeze(dim=-1).unsqueeze(dim=-1)
+                            rewards = rewards[:, :, 0].unsqueeze(dim=-1)
                         self.alg_ll.process_env_step(rewards, dones, infos)
                         
                         if self.log_dir is not None:
                             # Book keeping
                             if 'episode' in infos:
                                 ep_infos.append(infos['episode'])
-                            cur_reward_sum_ll += rewards.squeeze()
+                            cur_mean_reward_sum_ll += torch.sum(torch.mean(rewards[:, self.alg_ll.actor_critic.teams[0], :], dim = 1), dim = 1)
+                            # cur_mean_team_reward_sum_ll += torch.mean(rewards[:, self.alg_ll.teams[0], 1], dim = 1)
                             cur_episode_length_ll += 1
                             new_ids_ll = (dones > 0).nonzero(as_tuple=False)
-                            rewbuffer_ll.extend(cur_reward_sum_ll[new_ids_ll][:, 0].cpu().numpy().tolist())
+                            rewbuffer_ll.extend(cur_mean_reward_sum_ll[new_ids_ll][:, 0].cpu().numpy().tolist())
+                            # trewbuffer_ll.extend(cur_mean_team_reward_sum_ll[new_ids_ll][:, 0].cpu().numpy().tolist())
                             lenbuffer_ll.extend(cur_episode_length_ll[new_ids_ll][:, 0].cpu().numpy().tolist())
-                            cur_reward_sum_ll[new_ids_ll] = 0
+                            cur_mean_reward_sum_ll[new_ids_ll] = 0
+                            # cur_mean_team_reward_sum_ll[new_ids_ll] = 0
                             cur_episode_length_ll[new_ids_ll] = 0
+
+                        # self.alg_ll.actor_critic.update_ac_ratings(infos)
 
                     stop_ll = time.time()
                     collection_time_ll = stop_ll - start_ll
@@ -241,14 +277,16 @@ class BilevelOnPolicyRunner:
                     start_ll = stop_ll
                     self.alg_ll.compute_returns(critic_obs_ll)
                 
-                mean_value_loss_ll, mean_surrogate_loss_ll, mean_entropy_loss_ll = self.alg_ll.update()
+                mean_value_loss_ll, mean_surrogate_loss_ll, mean_entropy_loss_ll, _ = self.alg_ll.update()
+                # if  it % self.population_update_interval == 0:
+                #     self.alg_ll.update_population()
                 stop_ll = time.time()
                 learn_time_ll = stop_ll - start_ll
                 if self.log_dir is not None:
                     self.log(locals(), self.num_steps_per_env_ll, log_ll=True)
-                if it % self.save_interval == 0:
-                    self.save_ll(os.path.join(self.log_dir, 'll_model', 'model_{}.pt'.format(it)))
-                ep_infos.clear()
+                # if it % self.save_interval == 0:
+                #     self.save_ll(os.path.join(self.log_dir, 'll_model', 'model_{}.pt'.format(it)))
+                # ep_infos.clear()
 
             else:
                 # ### High-level Training ###
@@ -262,8 +300,8 @@ class BilevelOnPolicyRunner:
                 with torch.inference_mode(): 
                     for i_hl in range(self.num_steps_per_env_hl):
                         actions_hl_raw = self.alg_hl.act(obs, critic_obs)
-                        self.env.set_hl_action_probs(self.alg_hl.actor_critic.distribution.probs)
-                        reward_ep_ll = torch.zeros(self.env.num_envs, 1, 1, dtype=torch.float, device=self.device)
+                        self.env.set_hl_action_probs(self.alg_hl.actor_critic.action_probs)
+                        reward_ep_ll = torch.zeros(self.env.num_envs, self.num_agents, 1, dtype=torch.float, device=self.device)
                         for i_ll in range(self.dt_hl):
                             actions_hl = self.env.project_into_track_frame(actions_hl_raw)
                             obs_ll = torch.concat((obs, actions_hl), dim=-1)
@@ -274,7 +312,7 @@ class BilevelOnPolicyRunner:
                             critic_obs = privileged_obs if privileged_obs is not None else obs
                             obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
                             if rewards.shape[-1]==2:
-                                rewards = rewards[:, 0, 0].unsqueeze(dim=-1).unsqueeze(dim=-1)
+                                rewards = rewards[:, :, 0].unsqueeze(dim=-1)
                             reward_ep_ll += rewards  # .squeeze()
                         
                         self.alg_hl.process_env_step(reward_ep_ll, dones, infos)
@@ -283,12 +321,12 @@ class BilevelOnPolicyRunner:
                             # Book keeping
                             if 'episode' in infos:
                                 ep_infos.append(infos['episode'])
-                            cur_reward_sum_hl += reward_ep_ll.squeeze()
+                            cur_mean_reward_sum_hl += torch.sum(torch.mean(reward_ep_ll[:, self.alg_ll.actor_critic.teams[0], :], dim = 1), dim = 1)
                             cur_episode_length_hl += self.dt_hl
                             new_ids_hl = (dones > 0).nonzero(as_tuple=False)
-                            rewbuffer_hl.extend(cur_reward_sum_hl[new_ids_hl][:, 0].cpu().numpy().tolist())
+                            rewbuffer_hl.extend(cur_mean_reward_sum_hl[new_ids_hl][:, 0].cpu().numpy().tolist())
                             lenbuffer_hl.extend(cur_episode_length_hl[new_ids_hl][:, 0].cpu().numpy().tolist())
-                            cur_reward_sum_hl[new_ids_hl] = 0
+                            cur_mean_reward_sum_hl[new_ids_hl] = 0
                             cur_episode_length_hl[new_ids_hl] = 0
 
                     stop_hl = time.time()
@@ -298,14 +336,17 @@ class BilevelOnPolicyRunner:
                     start_hl = stop_hl
                     self.alg_hl.compute_returns(critic_obs)
                 
-                mean_value_loss_hl, mean_surrogate_loss_hl, mean_entropy_loss_hl = self.alg_hl.update()
+                mean_value_loss_hl, mean_surrogate_loss_hl, mean_entropy_loss_hl, _ = self.alg_hl.update()
                 stop_hl = time.time()
                 learn_time_hl = stop_hl - start_hl
                 if self.log_dir is not None:
                     self.log(locals(), self.num_steps_per_env_hl, log_ll=False)
-                if it % self.save_interval == 0:
-                    self.save_hl(os.path.join(self.log_dir, 'hl_model', 'model_{}.pt'.format(it)))
-                ep_infos.clear()
+
+            if it % self.save_interval == 0:
+                self.save_ll(os.path.join(self.log_dir, 'll_model', 'model_{}.pt'.format(it)))
+                self.save_hl(os.path.join(self.log_dir, 'hl_model', 'model_{}.pt'.format(it)))
+            ep_infos.clear()
+        
         
         self.current_learning_iteration += num_learning_iterations
         self.save_hl(os.path.join(self.log_dir, 'hl_model', 'model_{}.pt'.format(self.current_learning_iteration)))
@@ -463,6 +504,64 @@ class BilevelOnPolicyRunner:
     def load(self, path_ll, path_hl, load_optimizer = True):
         self.load_ll(path_ll, load_optimizer= load_optimizer)
         self.load_hl(path_hl, load_optimizer= load_optimizer)
+
+    def load_multi_path(self, paths_hl, paths_ll, load_optimizer=True):
+        model_dicts_hl, model_dicts_ll = [], []
+        opt_dicts_hl, opt_dicts_ll = [], []
+        dicts_hl, dicts_ll = [], []
+        for path_hl, path_ll in zip(paths_hl, paths_ll):
+            # HL
+            dict_hl = torch.load(path_hl)
+            dicts_hl.append(dict_hl)
+            model_dicts_hl.append(dict_hl['model_state_dict'])
+            opt_dicts_hl.append(dict_hl['optimizer_state_dict'])
+            # LL
+            dict_ll = torch.load(path_ll)
+            dicts_ll.append(dict_ll)
+            model_dicts_ll.append(dict_ll['model_state_dict'])
+            opt_dicts_ll.append(dict_ll['optimizer_state_dict'])
+        self.alg_hl.actor_critic.load_multi_state_dict(model_dicts_hl)
+        self.alg_ll.actor_critic.load_multi_state_dict(model_dicts_ll)
+        if load_optimizer:
+            self.alg_hl.optimizer.load_state_dict(opt_dicts_hl[0])
+            self.alg_ll.optimizer.load_state_dict(opt_dicts_ll[0])
+        self.current_learning_iteration = dicts_hl[0]['iter']
+
+        # #add loaded models to buffers and set current ratings
+        # infos = []
+        # self.alg.actor_critic.past_models = model_dicts
+        # # self.alg.actor_critic.agentratings = []
+        # # self.alg.actor_critic.past_ratings_mu = []
+        # # self.alg.actor_critic.past_ratings_sigma = []
+        # for dict in dicts:
+        #     info = dict['infos']
+        #     # mu = info['trueskill']['mu']
+        #     # sigma = info['trueskill']['sigma']
+        #     # active_rating = self.alg.actor_critic.new_rating(mu, sigma)
+        #     # self.alg.actor_critic.agentratings.append(active_rating)
+        #     # self.alg.actor_critic.past_ratings_mu.append(mu)
+        #     # self.alg.actor_critic.past_ratings_sigma.append(sigma)
+        #     infos.append(info)
+        # return infos
+    
+    def populate_adversary_buffer(self, paths_hl, paths_ll):
+        for path_hl, path_ll in zip(paths_hl, paths_ll):
+            # HL
+            dict_hl = torch.load(path_hl)
+            info_hl = dict_hl['infos']
+            #mu = info['trueskill']['mu']
+            #sigma = info['trueskill']['sigma']
+            #self.alg.actor_critic.past_ratings_mu.append(mu)
+            #self.alg.actor_critic.past_ratings_sigma.append(sigma)
+            self.alg_hl.actor_critic.past_models.append(dict_hl['model_state_dict'])
+            # LL
+            dict_ll = torch.load(path_ll)
+            info_ll = dict_hl['infos']
+            #mu = info['trueskill']['mu']
+            #sigma = info['trueskill']['sigma']
+            #self.alg.actor_critic.past_ratings_mu.append(mu)
+            #self.alg.actor_critic.past_ratings_sigma.append(sigma)
+            self.alg_ll.actor_critic.past_models.append(dict_ll['model_state_dict'])
         
     def get_inference_policy_hl(self, device=None):
         self.alg_hl.actor_critic.eval() # switch to evaluation mode (dropout for example)
