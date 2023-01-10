@@ -39,6 +39,7 @@ class BimaPPO:
     actor_critic: MultiTeamBilevelActorCritic
     def __init__(self,
                  actor_critic,
+                 centralized_value=False,
                  num_learning_epochs=1,
                  num_mini_batches=1,
                  clip_param=0.2,
@@ -88,11 +89,12 @@ class BimaPPO:
         self.use_clipped_value_loss = use_clipped_value_loss
 
         self.n_critics = self.actor_critic.n_critics
+        assert self.n_critics==1
+
+        self.centralized_value = centralized_value
 
         self._value_stdv_run_mean = 0.05
         self._value_stdv_run_stdv = 0.0
-
-        self.value_selector = torch.distributions.Categorical(probs=0.5*torch.ones((2,)).to(self.device))
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents):
         self.storage = BimaRolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents, self.n_critics, self.device)
@@ -145,7 +147,7 @@ class BimaPPO:
         self.actor_critic.reset(dones)
     
     def compute_returns(self, last_critic_obs):
-        last_values= self.actor_critic.evaluate(last_critic_obs[:, self.actor_critic.teams[0], :]).detach()
+        last_values = self.actor_critic.evaluate(last_critic_obs[:, self.actor_critic.teams[0], :]).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
     def update(self):
@@ -198,10 +200,17 @@ class BimaPPO:
 
             # Value function loss
             if self.use_clipped_value_loss:
+                # Old
+                # value_individual_clipped = target_values_individual_batch + (value_batch[..., 0] - target_values_individual_batch).clamp(-self.clip_param, self.clip_param)
+                # value_losses_individual = (value_batch[..., 0] - returns_individual_batch).pow(2)
+                # value_losses_individual_clipped = (value_individual_clipped - returns_individual_batch).pow(2)
+                # value_loss_individual = torch.max(value_losses_individual, value_losses_individual_clipped).mean((0, -1))
+                # New
                 value_individual_clipped = target_values_individual_batch + (value_batch[..., 0] - target_values_individual_batch).clamp(-self.clip_param, self.clip_param)
-                value_losses_individual = (value_batch[..., 0] - returns_individual_batch).pow(2)
-                value_losses_individual_clipped = (value_individual_clipped - returns_individual_batch).pow(2)
-                value_loss_individual = torch.max(value_losses_individual, value_losses_individual_clipped).mean((0, -1))
+                value_errs_individual = (value_batch[..., 0] - returns_individual_batch)
+                value_errs_individual_clipped = (value_individual_clipped - returns_individual_batch)
+                value_err_individual = torch.max(value_errs_individual, value_errs_individual_clipped)
+
 
                 # #since both entries the same pick team entry for agent 0 by convention
                 # value_team_clipped = target_values_team_batch[..., 0] + (value_batch[..., 0, 1] - target_values_team_batch[..., 0]).clamp(-self.clip_param,
@@ -210,12 +219,19 @@ class BimaPPO:
                 # value_losses_team_clipped = (value_team_clipped - returns_team_batch[..., 0]).pow(2)
                 # value_loss_team = torch.max(value_losses_team, value_losses_team_clipped).mean(dim=0)
             else:
-                value_loss_individual = (returns_individual_batch - value_batch[:,:,0]).pow(2).mean()
+                # Old
+                # value_loss_individual = (returns_individual_batch - value_batch[:,:,0]).pow(2).mean()
+                # New
+                value_err_individual = (returns_individual_batch - value_batch[:,:,0])
                 # #since both entries the same pick team entry for agent 0 by convention
                 # value_loss_team = (returns_team_batch[:,0] - value_batch[:,0,1]).pow(2).mean()
+            if self.centralized_value:
+                value_err = value_err_individual.mean(dim=-1)
+            else:
+                value_err = value_err_individual
+            value_loss = value_err.pow(2).mean()
 
-            value_selectors = self.value_selector.sample((self.n_critics,))
-            loss = surrogate_loss + (value_selectors * (value_loss_individual)).mean() - self.entropy_coef * entropy_batch.mean()
+            loss = surrogate_loss + value_loss - self.entropy_coef * entropy_batch.mean()
 
             # # Penalize large action means to counteract tanh saturation --> for Gaussian
             # loss += (-1.0) * (self.actor_critic.distribution.mean**2).mean() - 0.1 * (self.actor_critic.distribution.scale**2).mean()
@@ -226,7 +242,7 @@ class BimaPPO:
             nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
             self.optimizer.step()
 
-            mean_value_loss += value_loss_individual.mean().item() 
+            mean_value_loss += value_loss.item() 
             mean_surrogate_loss += surrogate_loss.item()
             mean_joint_ratio_values += ratio.mean().item()
             mean_advantage_values += advantages_batch.mean().item()

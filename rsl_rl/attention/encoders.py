@@ -152,7 +152,7 @@ class EncoderAttention4(nn.Module):
         ego_encoder_layers.append(nn.Linear(num_ego_obs, hidden_dims[0]))
         # ego_encoder_layers.append(nn.LayerNorm(hidden_dims[0]))
         # ego_encoder_layers.append(nn.Tanh())
-        ego_encoder_layers.append(nn.ELU())
+        ego_encoder_layers.append(nn.LeakyReLU())
         for l in range(len(hidden_dims)-1):
             ego_encoder_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
             ego_encoder_layers.append(activation)
@@ -164,7 +164,7 @@ class EncoderAttention4(nn.Module):
         ado_encoder_layers.append(nn.Linear(num_ado_obs + 1, hidden_dims[0]))
         # ado_encoder_layers.append(nn.LayerNorm(hidden_dims[0]))
         # ado_encoder_layers.append(nn.Tanh())
-        ado_encoder_layers.append(nn.ELU())
+        ado_encoder_layers.append(nn.LeakyReLU())
         for l in range(len(hidden_dims)-1):
             ado_encoder_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
             ado_encoder_layers.append(activation)
@@ -243,7 +243,7 @@ class EncoderAttention4(nn.Module):
       return new_obs
 
 
-def get_encoder(num_ego_obs, num_ado_obs, hidden_dims, teamsize, numteams, activation='elu'):
+def get_encoder(num_ego_obs, num_ado_obs, hidden_dims, teamsize, numteams, activation='leaky_relu'):
     return EncoderAttention4(
       num_ego_obs=num_ego_obs, 
       num_ado_obs=num_ado_obs, 

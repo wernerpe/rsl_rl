@@ -36,6 +36,8 @@ from torch.distributions import Normal
 from torch.distributions import OneHotCategorical, TransformedDistribution, AffineTransform
 from torch.nn.modules import rnn
 
+from rsl_rl.utils import TruncatedNormal, SquashedNormal
+
 # from rsl_rl.modules.attention.encoders import EncoderAttention4
 
 
@@ -206,6 +208,7 @@ class BilevelActorCriticAttention(nn.Module):
     @property
     def entropy(self):
         return self.distribution.entropy().sum(dim=-1)
+        # return self.distribution.entropy.sum(dim=-1)
 
     def transform_mean_prediction(self, mean_raw):
 
@@ -229,6 +232,7 @@ class BilevelActorCriticAttention(nn.Module):
             # One-hot Categorical
             logits_merged = self.actor(observations)
             logits = logits_merged.view((*logits_merged.shape[:-1], self.num_actions, self.num_bins))
+            logits = 10 * torch.tanh(logits)
 
             # Add epsilon-greedy probabilities
             epsilon = 0.1
@@ -242,8 +246,11 @@ class BilevelActorCriticAttention(nn.Module):
         else:
             # Gaussian
             mean_raw = self.actor(observations)
+
             mean = self.transform_mean_prediction(mean_raw)
             self.distribution = Normal(mean, mean*0. + self.std)
+
+            # self.distribution = SquashedNormal(mean_raw, self.std)
 
     def convert_onehot_to_action(self, onehot):
         return (self._trafo_scale * onehot).sum(dim=-1) + self._trafo_loc

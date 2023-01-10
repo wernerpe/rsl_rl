@@ -120,9 +120,9 @@ class BimaOnPolicyRunner:
                                                         device=device,
                                                         **self.policy_cfg).to(self.device)
         alg_class_hl = eval(self.cfg["algorithm_class_hl_name"]) # BilevelPPO
-        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, device=self.device, **self.alg_cfg)
+        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=True, device=self.device, **self.alg_cfg)
         alg_class_ll = eval(self.cfg["algorithm_class_ll_name"]) # PPO
-        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, device=self.device, **self.alg_cfg)
+        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=False, device=self.device, **self.alg_cfg)
 
         self.num_steps_per_env_hl = self.cfg["num_steps_per_env_hl"]
         self.num_steps_per_env_ll = self.cfg["num_steps_per_env_ll"]

@@ -395,10 +395,10 @@ class TeamBilevelActorCritic(nn.Module):
         return self
 
     def act(self, observations, **kwargs):
-        actions = []
-        self.action_means = []
-        self.action_stds = []
-        self.action_entropies = []
+        # actions = []
+        # self.action_means = []
+        # self.action_stds = []
+        # self.action_entropies = []
 
         actions = self.ac.act(observations[:, :, :])
         self.action_means = self.ac.action_mean  # FIXME: discrete option correct?
