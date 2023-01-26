@@ -35,6 +35,7 @@ import torch.nn as nn
 from torch.distributions import Normal
 from torch.distributions import OneHotCategorical, TransformedDistribution, AffineTransform
 from torch.nn.modules import rnn
+import torch.nn.functional as F
 
 from rsl_rl.utils import TruncatedNormal, SquashedNormal
 
@@ -78,6 +79,7 @@ class BilevelActorCriticAttention(nn.Module):
                         activation='elu',
                         init_noise_std=1.0,
                         critic_output_dim=1,
+                        std_per_dim=False,
                         **kwargs):
         if kwargs:
             print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
@@ -107,12 +109,20 @@ class BilevelActorCriticAttention(nn.Module):
             mlp_input_dim_a = num_ego_obs + encoder_hidden_dims[-1]
             mlp_input_dim_c = num_ego_obs + encoder_hidden_dims[-1]
 
+        # mlp_input_dim_a = num_ego_obs + 3*num_ado_obs  # FIXME: testing
+        # mlp_input_dim_c = num_ego_obs + 3*num_ado_obs  # FIXME: testing
+
         mlp_input_dim_a += num_add_obs
         mlp_input_dim_c += num_add_obs
 
         enc_split_dim = num_actor_obs
 
+        self.num_actions = num_actions
         self.mlp_output_dim_a = num_actions
+
+        self.std_per_dim = std_per_dim
+        self.std_ini = init_noise_std
+        self.std_min = 1.e-2
 
         # # Encoder
         # self.encoder = encoder
@@ -123,12 +133,11 @@ class BilevelActorCriticAttention(nn.Module):
             assert self.use_output_mapping
 
             # Discrete actor
-            self.num_bins = 5
+            self.num_bins = 5  # 5
             self._trafo_scale = torch.tensor(np.linspace(start=act_min, stop=act_max, num=self.num_bins, axis=-1), dtype=torch.float, device=device)
             self._trafo_delta = self._trafo_scale[:, 1] - self._trafo_scale[:, 0]
             self._trafo_loc = 0.0 * torch.tensor(act_min, dtype=torch.float, device=device)
             self.mlp_output_dim_a = num_actions * self.num_bins
-            self.num_actions = num_actions
         else:
             if self.use_output_mapping:
                 self._mean_target_pos_min = nn.Parameter(torch.tensor(act_min[:2]), requires_grad=False)
@@ -139,6 +148,9 @@ class BilevelActorCriticAttention(nn.Module):
                 self._mean_target_std_max = nn.Parameter(torch.tensor(act_max[2:]), requires_grad=False)
                 self._mean_target_std_ini = nn.Parameter(torch.tensor(act_ini[2:]), requires_grad=False)
                 self._softplus = nn.Softplus()
+
+            if self.std_per_dim:
+                self.mlp_output_dim_a *= 2
         
         # Policy
         self.actor = ActorAttention(
@@ -223,7 +235,8 @@ class BilevelActorCriticAttention(nn.Module):
 
             mean = torch.concat((mean_target_pos, mean_target_std), dim=-1)
         else:
-            mean = 1.3 * torch.tanh(mean_raw)
+            mean = 1.0 * torch.tanh(mean_raw / 1.0)  # 1.3, / 1.0
+            # mean = mean_raw
         return mean
 
     def update_distribution(self, observations):
@@ -232,7 +245,7 @@ class BilevelActorCriticAttention(nn.Module):
             # One-hot Categorical
             logits_merged = self.actor(observations)
             logits = logits_merged.view((*logits_merged.shape[:-1], self.num_actions, self.num_bins))
-            logits = 10 * torch.tanh(logits)
+            logits = 5.0 * torch.tanh(logits)  # 5.0,  10.0
 
             # Add epsilon-greedy probabilities
             epsilon = 0.1
@@ -245,10 +258,25 @@ class BilevelActorCriticAttention(nn.Module):
             self.distribution = OneHotCategorical(logits=logits)
         else:
             # Gaussian
-            mean_raw = self.actor(observations)
-
+            if self.std_per_dim:
+                output_merged = self.actor(observations)
+                output = output_merged.view((*output_merged.shape[:-1], self.num_actions, 2))
+                mean_raw = output[..., 0]
+                std_raw = output[..., 1]
+                # # V1
+                std_ini = np.log(np.exp(self.std_ini) - 1)
+                std = F.softplus(std_raw + std_ini) + self.std_min
+                # # V2
+                # logstd_min = -4.0  # -3.0  # -4
+                # logstd_max = +2.0  # +1.0  # 0.2
+                # logstd = logstd_min + 0.5*(logstd_max-logstd_min)*(torch.tanh(std_raw)+1.0)
+                # std = torch.exp(logstd)  # +0.5)
+            else:
+                mean_raw = self.actor(observations)
+                std = mean_raw*0. + self.std
             mean = self.transform_mean_prediction(mean_raw)
-            self.distribution = Normal(mean, mean*0. + self.std)
+
+            self.distribution = Normal(mean, std)
 
             # self.distribution = SquashedNormal(mean_raw, self.std)
 
@@ -341,6 +369,7 @@ class ActorAttention(nn.Module):
         if not self._train_encoder:
             latent = latent.detach()
         obs = torch.concat((latent, obs2), dim=-1)
+        # obs = observations  # FIXME: testing
         return self._network(obs)
 
 
@@ -375,6 +404,7 @@ class CriticAttention(nn.Module):
         if not self._train_encoder:
             latent = latent.detach()
         obs = torch.concat((latent, obs2), dim=-1)
+        # obs = observations  # FIXME: testing
         return self._network(obs)
 
 

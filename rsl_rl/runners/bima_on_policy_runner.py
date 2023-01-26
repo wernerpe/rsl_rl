@@ -73,6 +73,11 @@ class BimaOnPolicyRunner:
         self.iter_per_hl = self.cfg["iter_per_hl"]
         self.iter_per_ll = self.cfg["iter_per_ll"]
 
+        self.pretrain_ll_iter = self.cfg["pretrain_ll_iter"]
+        self.warmup_hl_iter = self.cfg["warmup_hl_iter"]
+        self.warmup_hl_ini = self.cfg["warmup_hl_ini"]
+        self.warmup_hl_iter = min(self.warmup_hl_iter, self.pretrain_ll_iter)
+
         act_min = self.env.action_min_hl
         act_max = self.env.action_max_hl
         act_ini = self.env.action_ini_hl
@@ -93,6 +98,7 @@ class BimaOnPolicyRunner:
             hidden_dims=encoder_hidden_dims, 
             teamsize=teamsize,
             numteams=numteams,
+            device=device,
         )
 
         actor_critic_class_hl = eval(self.cfg["policy_class_hl_name"]) # BilevelActorCritic
@@ -199,6 +205,7 @@ class BimaOnPolicyRunner:
         self.alg_ll.actor_critic.train() # switch to train mode (for dropout for example)
 
         ep_infos = []
+        behavior_infos = []
         rewbuffer_hl = deque(maxlen=100)
         trewbuffer_hl = deque(maxlen=100)
         lenbuffer_hl = deque(maxlen=100)
@@ -220,7 +227,7 @@ class BimaOnPolicyRunner:
         for it in range(self.current_learning_iteration, tot_iter):
 
             # if (it % self.iter_per_level)==0 and it>0:
-            if it in iter_switch and it > 0:
+            if it in iter_switch and it > self.pretrain_ll_iter:
               train_ll = not train_ll
               train_hl = not train_hl
               obs, critic_obs = self.reset_environment_for_training()
@@ -232,12 +239,20 @@ class BimaOnPolicyRunner:
                 self.env.set_train_level(low_level=True)
 
                 start_ll = time.time()
+
+                # goal_pos_scale = self.warmup_hl_ini + it / (1.0 + self.warmup_hl_iter) * (1.0 - self.warmup_hl_ini)
+                # goal_pos_scale = min(goal_pos_scale, 1.0)
                 
                 # Rollout
                 with torch.inference_mode():
                     for i in range(self.num_steps_per_env_ll):
                         # Sample new HL target at every step and decide whether to update internally
                         actions_hl_raw = self.alg_hl.act(obs, critic_obs)
+                        # actions_hl_raw[..., :2] *= goal_pos_scale  # allow for warmup
+
+                        # if it < self.warmup_hl_iter:
+                        #     actions_hl_raw[..., 2:4] = 0.3 + 0.0*actions_hl_raw[..., 2:4]
+
                         self.env.set_hl_action_probs(self.alg_hl.actor_critic.action_probs)
                         actions_hl = self.env.project_into_track_frame(actions_hl_raw)
 
@@ -245,6 +260,8 @@ class BimaOnPolicyRunner:
                         critic_obs_ll = torch.concat((critic_obs, actions_hl), dim=-1)
                         actions_ll = self.alg_ll.act(obs_ll, critic_obs_ll)
                         self.env.set_ll_action_stats(self.alg_ll.actor_critic.action_mean, self.alg_ll.actor_critic.action_std)
+
+                        self.env.viewer.update_attention(self.alg_ll.actor_critic.teamacs[0].ac.actor._encoder.attention_weights)
 
                         obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
                         critic_obs = privileged_obs if privileged_obs is not None else obs
@@ -257,6 +274,8 @@ class BimaOnPolicyRunner:
                             # Book keeping
                             if 'episode' in infos:
                                 ep_infos.append(infos['episode'])
+                            if 'behavior' in infos:
+                                behavior_infos.append(infos['behavior'])
                             cur_mean_reward_sum_ll += torch.sum(torch.mean(rewards[:, self.alg_ll.actor_critic.teams[0], :], dim = 1), dim = 1)
                             # cur_mean_team_reward_sum_ll += torch.mean(rewards[:, self.alg_ll.teams[0], 1], dim = 1)
                             cur_episode_length_ll += 1
@@ -277,7 +296,7 @@ class BimaOnPolicyRunner:
                     start_ll = stop_ll
                     self.alg_ll.compute_returns(critic_obs_ll)
                 
-                mean_value_loss_ll, mean_surrogate_loss_ll, mean_entropy_loss_ll, _ = self.alg_ll.update()
+                mean_value_loss_ll, mean_surrogate_loss_ll, mean_entropy_loss_ll, mean_stats_ll = self.alg_ll.update()
                 # if  it % self.population_update_interval == 0:
                 #     self.alg_ll.update_population()
                 stop_ll = time.time()
@@ -307,6 +326,9 @@ class BimaOnPolicyRunner:
                             obs_ll = torch.concat((obs, actions_hl), dim=-1)
                             critic_obs_ll = torch.concat((critic_obs, actions_hl), dim=-1)
                             actions_ll = self.alg_ll.act(obs_ll, critic_obs_ll)
+
+                            self.env.viewer.update_attention(self.alg_ll.actor_critic.teamacs[0].ac.actor._encoder.attention_weights)
+
                             self.env.set_ll_action_stats(self.alg_ll.actor_critic.action_mean, self.alg_ll.actor_critic.action_std)
                             obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
                             critic_obs = privileged_obs if privileged_obs is not None else obs
@@ -321,6 +343,8 @@ class BimaOnPolicyRunner:
                             # Book keeping
                             if 'episode' in infos:
                                 ep_infos.append(infos['episode'])
+                            if 'behavior' in infos:
+                                behavior_infos.append(infos['behavior'])
                             cur_mean_reward_sum_hl += torch.sum(torch.mean(reward_ep_ll[:, self.alg_ll.actor_critic.teams[0], :], dim = 1), dim = 1)
                             cur_episode_length_hl += self.dt_hl
                             new_ids_hl = (dones > 0).nonzero(as_tuple=False)
@@ -329,6 +353,8 @@ class BimaOnPolicyRunner:
                             cur_mean_reward_sum_hl[new_ids_hl] = 0
                             cur_episode_length_hl[new_ids_hl] = 0
 
+                        # self.alg_hl.actor_critic.update_ac_ratings(infos)
+
                     stop_hl = time.time()
                     collection_time_hl = stop_hl - start_hl
 
@@ -336,7 +362,9 @@ class BimaOnPolicyRunner:
                     start_hl = stop_hl
                     self.alg_hl.compute_returns(critic_obs)
                 
-                mean_value_loss_hl, mean_surrogate_loss_hl, mean_entropy_loss_hl, _ = self.alg_hl.update()
+                mean_value_loss_hl, mean_surrogate_loss_hl, mean_entropy_loss_hl, mean_stats_hl = self.alg_hl.update()
+                # if  it % self.population_update_interval == 0:
+                #     self.alg_hl.update_population()
                 stop_hl = time.time()
                 learn_time_hl = stop_hl - start_hl
                 if self.log_dir is not None:
@@ -346,6 +374,7 @@ class BimaOnPolicyRunner:
                 self.save_ll(os.path.join(self.log_dir, 'll_model', 'model_{}.pt'.format(it)))
                 self.save_hl(os.path.join(self.log_dir, 'hl_model', 'model_{}.pt'.format(it)))
             ep_infos.clear()
+            behavior_infos.clear()
         
         
         self.current_learning_iteration += num_learning_iterations
@@ -375,6 +404,18 @@ class BimaOnPolicyRunner:
                 value = torch.mean(infotensor)
                 self.writer.add_scalar('Episode/' + key, value, locs['it'])
                 ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+        if locs['behavior_infos']:
+            for key in locs['behavior_infos'][0]:
+                infotensor = torch.tensor([], device=self.device)
+                for behavior_info in locs['behavior_infos']:
+                    # handle scalar and zero dimensional tensor infos
+                    if not isinstance(behavior_info[key], torch.Tensor):
+                        behavior_info[key] = torch.Tensor([behavior_info[key]])
+                    if len(behavior_info[key].shape) == 0:
+                        behavior_info[key] = behavior_info[key].unsqueeze(0)
+                    infotensor = torch.cat((infotensor, behavior_info[key].to(self.device)))
+                value = torch.mean(infotensor)
+                self.writer.add_scalar('Behavior/' + key, value, locs['it'])
         mean_std_hl = self.alg_hl.actor_critic.std.mean()
         mean_std_ll = self.alg_ll.actor_critic.std.mean()
         fps = int(steps_per_env * self.env.num_envs / (tot_time))
@@ -387,6 +428,8 @@ class BimaOnPolicyRunner:
           self.writer.add_scalar('Policy/mean_noise_std_hl', mean_std_hl.item(), locs['it'])
           self.writer.add_scalar('Perf/collection time_hl', locs['collection_time_hl'], locs['it'])
           self.writer.add_scalar('Perf/learning_time_hl', locs['learn_time_hl'], locs['it'])
+          for key, value in locs['mean_stats_hl'].items():
+              self.writer.add_scalar('Loss/' + key + '_hl', value, locs['it'])
         else:
           self.writer.add_scalar('Loss/value_function_ll', locs['mean_value_loss_ll'], locs['it'])
           self.writer.add_scalar('Loss/surrogate_ll', locs['mean_surrogate_loss_ll'], locs['it'])
@@ -395,6 +438,8 @@ class BimaOnPolicyRunner:
           self.writer.add_scalar('Policy/mean_noise_std_ll', mean_std_ll.item(), locs['it'])
           self.writer.add_scalar('Perf/collection time_ll', locs['collection_time_ll'], locs['it'])
           self.writer.add_scalar('Perf/learning_time_ll', locs['learn_time_ll'], locs['it'])
+          for key, value in locs['mean_stats_ll'].items():
+              self.writer.add_scalar('Loss/' + key + '_ll', value, locs['it'])
         self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
         if len(locs['rewbuffer_hl']) > 0:
             self.writer.add_scalar('Train/mean_reward_hl', statistics.mean(locs['rewbuffer_hl']), locs['it'])

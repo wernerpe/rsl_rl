@@ -159,6 +159,10 @@ class BimaPPO:
         mean_jr_num = 0
         mean_advantage_values = 0
         mean_mu0_batch = 0
+        mean_param_norm = 0
+
+        mean_enc_wproj_a = 0
+        mean_enc_wproj_c = 0
 
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
@@ -198,6 +202,14 @@ class BimaPPO:
                                                                             1.0 + self.clip_param)
             surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
 
+            # Centralization via mean
+            if self.centralized_value:
+                value_batch = value_batch.squeeze(dim=-1).mean(dim=-1)
+                target_values_individual_batch = target_values_individual_batch.mean(dim=-1)
+                returns_individual_batch = returns_individual_batch.mean(dim=-1)
+            else:
+                value_batch = value_batch.squeeze(dim=-1)
+
             # Value function loss
             if self.use_clipped_value_loss:
                 # Old
@@ -205,11 +217,12 @@ class BimaPPO:
                 # value_losses_individual = (value_batch[..., 0] - returns_individual_batch).pow(2)
                 # value_losses_individual_clipped = (value_individual_clipped - returns_individual_batch).pow(2)
                 # value_loss_individual = torch.max(value_losses_individual, value_losses_individual_clipped).mean((0, -1))
+                
                 # New
-                value_individual_clipped = target_values_individual_batch + (value_batch[..., 0] - target_values_individual_batch).clamp(-self.clip_param, self.clip_param)
-                value_errs_individual = (value_batch[..., 0] - returns_individual_batch)
-                value_errs_individual_clipped = (value_individual_clipped - returns_individual_batch)
-                value_err_individual = torch.max(value_errs_individual, value_errs_individual_clipped)
+                value_individual_clipped = target_values_individual_batch + (value_batch - target_values_individual_batch).clamp(-self.clip_param, self.clip_param)
+                value_losses_individual = (value_batch - returns_individual_batch).pow(2)
+                value_losses_individual_clipped = (value_individual_clipped - returns_individual_batch).pow(2)
+                value_loss_individual = torch.max(value_losses_individual, value_losses_individual_clipped)
 
 
                 # #since both entries the same pick team entry for agent 0 by convention
@@ -222,14 +235,10 @@ class BimaPPO:
                 # Old
                 # value_loss_individual = (returns_individual_batch - value_batch[:,:,0]).pow(2).mean()
                 # New
-                value_err_individual = (returns_individual_batch - value_batch[:,:,0])
+                value_loss_individual = (returns_individual_batch - value_batch).pow(2)
                 # #since both entries the same pick team entry for agent 0 by convention
                 # value_loss_team = (returns_team_batch[:,0] - value_batch[:,0,1]).pow(2).mean()
-            if self.centralized_value:
-                value_err = value_err_individual.mean(dim=-1)
-            else:
-                value_err = value_err_individual
-            value_loss = value_err.pow(2).mean()
+            value_loss = value_loss_individual.mean()
 
             loss = surrogate_loss + value_loss - self.entropy_coef * entropy_batch.mean()
 
@@ -239,7 +248,7 @@ class BimaPPO:
             # Gradient step
             self.optimizer.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
+            param_norm = nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
             self.optimizer.step()
 
             mean_value_loss += value_loss.item() 
@@ -250,6 +259,10 @@ class BimaPPO:
             mean_jr_den += torch.sum(old_actions_log_prob_batch, dim = 1).mean().item()
             mean_mu0_batch += mu_batch[:, 0].mean().item()
             mean_entropy_loss += entropy_batch.mean().item()
+            mean_param_norm += param_norm.mean().item()
+
+            mean_enc_wproj_a += self.actor_critic.teamacs[0].ac.actor._encoder.projection_net.weight.mean().item()
+            mean_enc_wproj_c += self.actor_critic.teamacs[0].ac.critics[0]._encoder.projection_net.weight.mean().item()
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
@@ -260,10 +273,50 @@ class BimaPPO:
         mean_jr_den /= num_updates
         mean_mu0_batch /= num_updates
         mean_entropy_loss /= num_updates
+        mean_param_norm /= num_updates
+
+        mean_enc_wproj_a /= num_updates
+        mean_enc_wproj_c /= num_updates
+
         self.storage.clear()
 
         return mean_value_loss, mean_surrogate_loss, mean_entropy_loss, {'mean_joint_ratio_val': mean_joint_ratio_values, 
                                                                           'mean_advantage_val': mean_advantage_values, 
                                                                           'mean_jr_num': mean_jr_num, 
                                                                           'mean_jr_den': mean_jr_den, 
-                                                                          'mean_mu0': mean_mu0_batch}
+                                                                          'mean_mu0': mean_mu0_batch,
+                                                                          'mean_norm': mean_param_norm,
+                                                                          'mean_encoder_wproj_actor': mean_enc_wproj_a,
+                                                                          'mean_encoder_wproj_critic': mean_enc_wproj_c,
+                                                                          }
+
+    def update_population(self,):
+        # self.actor_critic.redraw_ac_networks()
+        if self.actor_critic.is_recurrent:
+            generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        elif self.actor_critic.is_attentive:
+          generator = self.storage.attention_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        else:
+            generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        batch = next(generator)
+        obs_batch = batch[0]
+
+        self.actor_critic.redraw_ac_networks_KL_divergence(obs_batch)
+
+    def update_ratings(self, eval_ranks, eval_ep_duration, max_ep_len):
+        eval_team_ranks = -100. * torch.ones_like(eval_ranks[..., :len(self.actor_critic.teams)])
+
+        for idx, team in enumerate(self.actor_critic.teams):
+            eval_team_ranks[:, idx] = torch.min(eval_ranks[:, team], dim = 1)[0]  # .reshape(-1,1)
+        # eval_team_ranks = (eval_team_ranks==0).type(torch.float)  # FIXME: this only works for 2 teams
+
+        ratings = self.actor_critic.get_ratings()
+        for ranks, dur in zip(eval_team_ranks, eval_ep_duration):
+            new_ratings = trueskill.rate(ratings, ranks.cpu().numpy())
+            update_ratio = 1.0*dur.item()/max_ep_len
+            for it, (old, new) in enumerate(zip(ratings, new_ratings)):
+                mu = (1-update_ratio)*old[0].mu + update_ratio*new[0].mu
+                sigma = (1-update_ratio)*old[0].sigma + update_ratio*new[0].sigma
+                ratings[it] = (trueskill.Rating(mu, sigma),)
+        self.actor_critic.set_ratings(ratings)
+        return 

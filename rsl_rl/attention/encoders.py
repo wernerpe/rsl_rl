@@ -128,23 +128,24 @@ class EncoderAttention3(nn.Module):
 
 class EncoderAttention4(nn.Module):
 
-  def __init__(self, num_ego_obs, num_ado_obs , hidden_dims, output_dim, numteams, teamsize, activation):
+  def __init__(self, num_ego_obs, num_ado_obs , hidden_dims, output_dim, numteams, teamsize, activation, device='cpu'):
 
         super(EncoderAttention4, self).__init__()
 
         self.num_agents = numteams * teamsize
         self.num_ego_obs = num_ego_obs
         self.num_ado_obs = num_ado_obs
+        self.teamsize = teamsize
 
         self.team_ids = [team_id for team_id in range(numteams) for _ in range(teamsize)]
-        self.team_ids = torch.tensor(self.team_ids).to('cuda:0')
+        self.team_ids = torch.tensor(self.team_ids).to(device)
 
         # Parameters
         attention_heads = 4
         # hidden_dim = 32
-        attend_dim = hidden_dims[-1] // attention_heads
+        self.attend_dim = hidden_dims[-1] // attention_heads
 
-        self.attention_weights = torch.zeros((attention_heads, self.num_agents-1)).to('cuda:0')
+        self.attention_weights = torch.zeros((attention_heads, self.num_agents-1)).to(device)
 
 
         # EGO encoder
@@ -176,17 +177,17 @@ class EncoderAttention4(nn.Module):
         self.selector_extractors = nn.ModuleList()
         self.latent_extractors = nn.ModuleList()
         for i in range(attention_heads):
-          self.key_extractors.append(nn.Linear(hidden_dims[-1], attend_dim, bias=False))
-          self.selector_extractors.append(nn.Linear(hidden_dims[-1], attend_dim, bias=False))
-          self.latent_extractors.append(nn.Sequential(nn.Linear(hidden_dims[-1], attend_dim), nn.LeakyReLU()))
+          self.key_extractors.append(nn.Linear(hidden_dims[-1], self.attend_dim, bias=False))
+          self.selector_extractors.append(nn.Linear(hidden_dims[-1], self.attend_dim, bias=False))
+          self.latent_extractors.append(nn.Sequential(nn.Linear(hidden_dims[-1], self.attend_dim), nn.LeakyReLU()))
 
         # Projection layer
         self.projection_net = nn.Linear(hidden_dims[-1], hidden_dims[-1])
 
-        # Dropout layers
-        drop_prob = 0.0
-        self.attention_drop = nn.Dropout(drop_prob)
-        self.projection_drop = nn.Dropout(drop_prob)
+        # # Dropout layers
+        # drop_prob = 0.0
+        # self.attention_drop = nn.Dropout(drop_prob)
+        # self.projection_drop = nn.Dropout(drop_prob)
 
 
   def forward(self, observations):
@@ -200,10 +201,11 @@ class EncoderAttention4(nn.Module):
       obs_ego = observations[..., :self.num_ego_obs]
       obs_ado = observations[..., self.num_ego_obs:self.num_ego_obs+(self.num_agents-1)*self.num_ado_obs]
 
-      if len(obs_ego.shape) > 2:
-        teamids = self.team_ids.repeat(observations.shape[0], observations.shape[1], 1)
-      else:
-        teamids = self.team_ids.repeat(observations.shape[0], 1)
+      # if len(obs_ego.shape) > 2:
+      #   teamids = self.team_ids.repeat(observations.shape[0], observations.shape[1], 1)
+      # else:
+      #   teamids = self.team_ids.repeat(observations.shape[0], 1)
+      teamids = self.team_ids + 0 * observations[..., 0].unsqueeze(dim=-1)
 
       ego_latent = self.ego_encoder(obs_ego)
 
@@ -222,15 +224,15 @@ class EncoderAttention4(nn.Module):
       all_ado_latents = []
       for head_idx, (ego_slct, ado_keys, ado_lat) in enumerate(zip(all_ego_slct, all_ado_keys, all_ado_lats)):
           attend_logits = torch.matmul(ego_slct.view(ego_slct.shape[0], 1, -1), torch.stack(ado_keys).permute(1, 2, 0))
-          scaled_attend_logits = attend_logits / np.sqrt(ado_keys[0].shape[1])
+          scaled_attend_logits = attend_logits / torch.sqrt(torch.tensor(self.attend_dim))
           attend_weights = F.softmax(scaled_attend_logits, dim=2)
 
-          self.attention_weights[head_idx, :] = attend_weights[0, 0].detach()
+          # self.attention_weights[head_idx, :] = attend_weights[0, 0].detach()
 
           # attend_weights = self.attention_drop(attend_weights)
 
-          ado_latents = (torch.stack(ado_lat).permute(1, 2, 0) * attend_weights).sum(dim=2)
-          all_ado_latents.append(ado_latents)
+          # ado_latents = (torch.stack(ado_lat).permute(1, 2, 0) * attend_weights).sum(dim=2)
+          all_ado_latents.append((torch.stack(ado_lat).permute(1, 2, 0) * attend_weights).sum(dim=2))
 
       all_ado_latents = torch.cat(all_ado_latents, dim=1)
       all_ado_latents = self.projection_net(all_ado_latents)
@@ -239,11 +241,12 @@ class EncoderAttention4(nn.Module):
       # new_obs = torch.cat((obs_ego, *all_ado_latents), dim=1)
       new_obs = torch.cat((obs_ego, all_ado_latents), dim=1)
       if multi_ego:
-        new_obs = new_obs.view(*obs_shape[:2], -1)
+        # new_obs = new_obs.view(*obs_shape[:2], -1)
+        new_obs = new_obs.view(obs_shape[0], obs_shape[1], -1)
       return new_obs
 
 
-def get_encoder(num_ego_obs, num_ado_obs, hidden_dims, teamsize, numteams, activation='leaky_relu'):
+def get_encoder(num_ego_obs, num_ado_obs, hidden_dims, teamsize, numteams, activation='leaky_relu', device='cpu'):
     return EncoderAttention4(
       num_ego_obs=num_ego_obs, 
       num_ado_obs=num_ado_obs, 
@@ -251,5 +254,6 @@ def get_encoder(num_ego_obs, num_ado_obs, hidden_dims, teamsize, numteams, activ
       output_dim=num_ado_obs, 
       numteams=numteams, 
       teamsize=teamsize,
-      activation=activation
+      activation=activation,
+      device=device
     )
