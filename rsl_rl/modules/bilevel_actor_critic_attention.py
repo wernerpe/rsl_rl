@@ -122,7 +122,7 @@ class BilevelActorCriticAttention(nn.Module):
 
         self.std_per_dim = std_per_dim
         self.std_ini = init_noise_std
-        self.std_min = 1.e-2
+        self.std_min = 3.e-2  # 1.e-2
 
         # # Encoder
         # self.encoder = encoder
@@ -245,15 +245,15 @@ class BilevelActorCriticAttention(nn.Module):
             # One-hot Categorical
             logits_merged = self.actor(observations)
             logits = logits_merged.view((*logits_merged.shape[:-1], self.num_actions, self.num_bins))
-            logits = 5.0 * torch.tanh(logits)  # 5.0,  10.0
+            logits = 10.0 * torch.tanh(logits / 2.0)  # 5.0,  10.0
 
-            # Add epsilon-greedy probabilities
-            epsilon = 0.1
-            damping = 1e-3
-            probs = torch.exp(logits) / (1.0 + torch.exp(logits))
-            probs = probs / probs.sum(dim=-1).unsqueeze(dim=-1)
-            probs = (1.0 - epsilon) * probs + epsilon * torch.ones_like(probs) / probs.shape[-1]
-            logits = torch.log(probs / (1.0 - probs + damping))
+            # # Add epsilon-greedy probabilities
+            # epsilon = 0.0  # 0.1
+            # damping = 1e-3
+            # probs = torch.exp(logits) / (1.0 + torch.exp(logits))
+            # probs = probs / probs.sum(dim=-1).unsqueeze(dim=-1)
+            # probs = (1.0 - epsilon) * probs + epsilon * torch.ones_like(probs) / probs.shape[-1]
+            # logits = torch.log(probs / (1.0 - probs + damping))
 
             self.distribution = OneHotCategorical(logits=logits)
         else:
@@ -264,13 +264,13 @@ class BilevelActorCriticAttention(nn.Module):
                 mean_raw = output[..., 0]
                 std_raw = output[..., 1]
                 # # V1
-                std_ini = np.log(np.exp(self.std_ini) - 1)
-                std = F.softplus(std_raw + std_ini) + self.std_min
-                # # V2
-                # logstd_min = -4.0  # -3.0  # -4
-                # logstd_max = +2.0  # +1.0  # 0.2
-                # logstd = logstd_min + 0.5*(logstd_max-logstd_min)*(torch.tanh(std_raw)+1.0)
-                # std = torch.exp(logstd)  # +0.5)
+                # std_ini = np.log(np.exp(self.std_ini) - 1)
+                # std = F.softplus(std_raw + std_ini) + self.std_min
+                # V2
+                logstd_min = -5.0  # -4.0  # -3.0  # -4
+                logstd_max = 2.0  # +0.0  # +1.0  # 0.2
+                logstd = logstd_min + 0.5*(logstd_max-logstd_min)*(torch.tanh(std_raw)+1.0)
+                std = torch.exp(logstd)  # +0.5)
             else:
                 mean_raw = self.actor(observations)
                 std = mean_raw*0. + self.std

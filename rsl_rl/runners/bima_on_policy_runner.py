@@ -126,9 +126,9 @@ class BimaOnPolicyRunner:
                                                         device=device,
                                                         **self.policy_cfg).to(self.device)
         alg_class_hl = eval(self.cfg["algorithm_class_hl_name"]) # BilevelPPO
-        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=True, device=self.device, **self.alg_cfg)
-        alg_class_ll = eval(self.cfg["algorithm_class_ll_name"]) # PPO
-        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=False, device=self.device, **self.alg_cfg)
+        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=True, device=self.device, schedule="adaptive", clip_param=0.1, entropy_coef=0.001, **self.alg_cfg)
+        alg_class_ll = eval(self.cfg["algorithm_class_ll_name"]) # BilevelPPO
+        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=False, device=self.device, schedule="adaptive", clip_param=0.2, entropy_coef=0.01, **self.alg_cfg)
 
         self.num_steps_per_env_hl = self.cfg["num_steps_per_env_hl"]
         self.num_steps_per_env_ll = self.cfg["num_steps_per_env_ll"]
@@ -240,15 +240,15 @@ class BimaOnPolicyRunner:
 
                 start_ll = time.time()
 
-                # goal_pos_scale = self.warmup_hl_ini + it / (1.0 + self.warmup_hl_iter) * (1.0 - self.warmup_hl_ini)
-                # goal_pos_scale = min(goal_pos_scale, 1.0)
+                goal_pos_scale = self.warmup_hl_ini + it / (1.0 + self.warmup_hl_iter) * (1.0 - self.warmup_hl_ini)
+                goal_pos_scale = min(goal_pos_scale, 1.0)
                 
                 # Rollout
                 with torch.inference_mode():
                     for i in range(self.num_steps_per_env_ll):
                         # Sample new HL target at every step and decide whether to update internally
                         actions_hl_raw = self.alg_hl.act(obs, critic_obs)
-                        # actions_hl_raw[..., :2] *= goal_pos_scale  # allow for warmup
+                        actions_hl_raw[..., :2] *= goal_pos_scale  # allow for warmup
 
                         # if it < self.warmup_hl_iter:
                         #     actions_hl_raw[..., 2:4] = 0.3 + 0.0*actions_hl_raw[..., 2:4]
@@ -287,7 +287,7 @@ class BimaOnPolicyRunner:
                             # cur_mean_team_reward_sum_ll[new_ids_ll] = 0
                             cur_episode_length_ll[new_ids_ll] = 0
 
-                        # self.alg_ll.actor_critic.update_ac_ratings(infos)
+                        self.alg_ll.actor_critic.update_ac_ratings(infos)
 
                     stop_ll = time.time()
                     collection_time_ll = stop_ll - start_ll
@@ -297,8 +297,8 @@ class BimaOnPolicyRunner:
                     self.alg_ll.compute_returns(critic_obs_ll)
                 
                 mean_value_loss_ll, mean_surrogate_loss_ll, mean_entropy_loss_ll, mean_stats_ll = self.alg_ll.update()
-                # if  it % self.population_update_interval == 0:
-                #     self.alg_ll.update_population()
+                if  it % self.population_update_interval == 0:
+                    self.alg_ll.update_population()
                 stop_ll = time.time()
                 learn_time_ll = stop_ll - start_ll
                 if self.log_dir is not None:
@@ -353,7 +353,7 @@ class BimaOnPolicyRunner:
                             cur_mean_reward_sum_hl[new_ids_hl] = 0
                             cur_episode_length_hl[new_ids_hl] = 0
 
-                        # self.alg_hl.actor_critic.update_ac_ratings(infos)
+                        self.alg_hl.actor_critic.update_ac_ratings(infos)
 
                     stop_hl = time.time()
                     collection_time_hl = stop_hl - start_hl
@@ -363,8 +363,8 @@ class BimaOnPolicyRunner:
                     self.alg_hl.compute_returns(critic_obs)
                 
                 mean_value_loss_hl, mean_surrogate_loss_hl, mean_entropy_loss_hl, mean_stats_hl = self.alg_hl.update()
-                # if  it % self.population_update_interval == 0:
-                #     self.alg_hl.update_population()
+                if  it % self.population_update_interval == 0:
+                    self.alg_hl.update_population()
                 stop_hl = time.time()
                 learn_time_hl = stop_hl - start_hl
                 if self.log_dir is not None:
