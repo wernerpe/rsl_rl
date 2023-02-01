@@ -79,7 +79,7 @@ class BilevelActorCriticAttention(nn.Module):
                         activation='elu',
                         init_noise_std=1.0,
                         critic_output_dim=1,
-                        std_per_dim=False,
+                        std_per_dim=True,
                         **kwargs):
         if kwargs:
             print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
@@ -263,14 +263,14 @@ class BilevelActorCriticAttention(nn.Module):
                 output = output_merged.view((*output_merged.shape[:-1], self.num_actions, 2))
                 mean_raw = output[..., 0]
                 std_raw = output[..., 1]
-                # # V1
-                # std_ini = np.log(np.exp(self.std_ini) - 1)
-                # std = F.softplus(std_raw + std_ini) + self.std_min
+                # V1
+                std_ini = np.log(np.exp(self.std_ini) - 1)
+                std = F.softplus(std_raw + std_ini) + self.std_min
                 # V2
-                logstd_min = -5.0  # -4.0  # -3.0  # -4
-                logstd_max = 2.0  # +0.0  # +1.0  # 0.2
-                logstd = logstd_min + 0.5*(logstd_max-logstd_min)*(torch.tanh(std_raw)+1.0)
-                std = torch.exp(logstd)  # +0.5)
+                # logstd_min = -5.0  # -4.0  # -3.0  # -4
+                # logstd_max = 2.0  # +0.0  # +1.0  # 0.2
+                # logstd = logstd_min + 0.5*(logstd_max-logstd_min)*(torch.tanh(std_raw)+1.0)
+                # std = torch.exp(logstd)  # +0.5)
             else:
                 mean_raw = self.actor(observations)
                 std = mean_raw*0. + self.std
@@ -352,6 +352,7 @@ class ActorAttention(nn.Module):
         actor_layers.append(nn.Linear(input_dim, hidden_dims[0]))
         actor_layers.append(nn.LayerNorm(hidden_dims[0]))
         actor_layers.append(nn.Tanh())
+        # actor_layers.append(nn.ELU())
         # actor_layers.append(activation)
         for l in range(len(hidden_dims)):
             if l == len(hidden_dims) - 1:
@@ -388,6 +389,7 @@ class CriticAttention(nn.Module):
         critic_layers.append(nn.Linear(input_dim, hidden_dims[0]))
         critic_layers.append(nn.LayerNorm(hidden_dims[0]))
         critic_layers.append(nn.Tanh())
+        # critic_layers.append(nn.ELU())
         for l in range(len(hidden_dims)):
             if l == len(hidden_dims) - 1:
                 critic_layers.append(nn.Linear(hidden_dims[l], output_dims))
