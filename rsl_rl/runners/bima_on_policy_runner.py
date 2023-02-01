@@ -126,9 +126,9 @@ class BimaOnPolicyRunner:
                                                         device=device,
                                                         **self.policy_cfg).to(self.device)
         alg_class_hl = eval(self.cfg["algorithm_class_hl_name"]) # BilevelPPO
-        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=True, device=self.device, schedule="adaptive", clip_param=0.1, entropy_coef=0.001, **self.alg_cfg)
+        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=True, device=self.device, schedule="fixed", clip_param=0.1, entropy_coef=0.001, **self.alg_cfg)
         alg_class_ll = eval(self.cfg["algorithm_class_ll_name"]) # BilevelPPO
-        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=False, device=self.device, schedule="adaptive", clip_param=0.2, entropy_coef=0.001, **self.alg_cfg)
+        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=False, device=self.device, schedule="fixed", clip_param=0.2, entropy_coef=0.003, **self.alg_cfg)
 
         self.num_steps_per_env_hl = self.cfg["num_steps_per_env_hl"]
         self.num_steps_per_env_ll = self.cfg["num_steps_per_env_ll"]
@@ -252,6 +252,11 @@ class BimaOnPolicyRunner:
 
                         # if it < self.warmup_hl_iter:
                         #     actions_hl_raw[..., 2:4] = 0.3 + 0.0*actions_hl_raw[..., 2:4]
+
+                        # # TODO: remove this after testing --> select middle uncertainty bin
+                        # actions_hl_raw[..., 2] = 0.30 + 0.0*actions_hl_raw[..., 2]
+                        # actions_hl_raw[..., 3] = 0.15 + 0.0*actions_hl_raw[..., 3]
+
 
                         self.env.set_hl_action_probs(self.alg_hl.actor_critic.action_probs)
                         actions_hl = self.env.project_into_track_frame(actions_hl_raw)

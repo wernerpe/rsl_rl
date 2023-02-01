@@ -79,7 +79,7 @@ class BilevelActorCriticAttention(nn.Module):
                         activation='elu',
                         init_noise_std=1.0,
                         critic_output_dim=1,
-                        std_per_dim=True,
+                        std_per_dim=False,
                         **kwargs):
         if kwargs:
             print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
