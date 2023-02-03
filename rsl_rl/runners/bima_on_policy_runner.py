@@ -68,6 +68,7 @@ class BimaOnPolicyRunner:
         self.num_actions_hl = self.env.num_actions_hl
         self.num_obs_add_ll = self.env.num_obs_add_ll
         self.dt_hl = self.env.dt_hl
+        self.iters_ado_ppc = env.iters_ado_ppc
 
         self.iter_per_level = 100
         self.iter_per_hl = self.cfg["iter_per_hl"]
@@ -128,7 +129,7 @@ class BimaOnPolicyRunner:
         alg_class_hl = eval(self.cfg["algorithm_class_hl_name"]) # BilevelPPO
         self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=True, device=self.device, schedule="fixed", clip_param=0.1, entropy_coef=0.001, **self.alg_cfg)
         alg_class_ll = eval(self.cfg["algorithm_class_ll_name"]) # BilevelPPO
-        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=False, device=self.device, schedule="fixed", clip_param=0.2, entropy_coef=0.003, **self.alg_cfg)
+        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=False, device=self.device, schedule="fixed", clip_param=0.2, entropy_coef=0.01, **self.alg_cfg)
 
         self.num_steps_per_env_hl = self.cfg["num_steps_per_env_hl"]
         self.num_steps_per_env_ll = self.cfg["num_steps_per_env_ll"]
@@ -226,11 +227,14 @@ class BimaOnPolicyRunner:
         tot_iter = self.current_learning_iteration + num_learning_iterations
         for it in range(self.current_learning_iteration, tot_iter):
 
+            if it > self.iters_ado_ppc:
+                self.env.set_steer_ado_ppc(False)
+
             # if (it % self.iter_per_level)==0 and it>0:
             if it in iter_switch and it > self.pretrain_ll_iter:
-              train_ll = not train_ll
-              train_hl = not train_hl
-              obs, critic_obs = self.reset_environment_for_training()
+                train_ll = not train_ll
+                train_hl = not train_hl
+                obs, critic_obs = self.reset_environment_for_training()
 
             if train_ll:
                 # ### Low-level Training ###
@@ -254,8 +258,10 @@ class BimaOnPolicyRunner:
                         #     actions_hl_raw[..., 2:4] = 0.3 + 0.0*actions_hl_raw[..., 2:4]
 
                         # # TODO: remove this after testing --> select middle uncertainty bin
+                        # actions_hl_raw[..., 0] = 4.00 + 0.0*actions_hl_raw[..., 0]
+                        # actions_hl_raw[..., 1] = 0.00 + 0.0*actions_hl_raw[..., 1]
                         # actions_hl_raw[..., 2] = 0.30 + 0.0*actions_hl_raw[..., 2]
-                        # actions_hl_raw[..., 3] = 0.15 + 0.0*actions_hl_raw[..., 3]
+                        # actions_hl_raw[..., 3] = 0.20 + 0.0*actions_hl_raw[..., 3]
 
 
                         self.env.set_hl_action_probs(self.alg_hl.actor_critic.action_probs)
@@ -276,8 +282,10 @@ class BimaOnPolicyRunner:
                         self.alg_ll.process_env_step(rewards, dones, infos)
                         
                         if self.log_dir is not None:
+
                             # Book keeping
                             if 'episode' in infos:
+                                infos["episode"]["rewards_ll"] = infos["episode"]["rewards"]
                                 ep_infos.append(infos['episode'])
                             if 'behavior' in infos:
                                 behavior_infos.append(infos['behavior'])
@@ -292,7 +300,7 @@ class BimaOnPolicyRunner:
                             # cur_mean_team_reward_sum_ll[new_ids_ll] = 0
                             cur_episode_length_ll[new_ids_ll] = 0
 
-                        self.alg_ll.actor_critic.update_ac_ratings(infos)
+                        self.alg_ll.actor_critic.update_ac_ratings(infos)  # NOTE: self-play
 
                     stop_ll = time.time()
                     collection_time_ll = stop_ll - start_ll
@@ -302,7 +310,7 @@ class BimaOnPolicyRunner:
                     self.alg_ll.compute_returns(critic_obs_ll)
                 
                 mean_value_loss_ll, mean_surrogate_loss_ll, mean_entropy_loss_ll, mean_stats_ll = self.alg_ll.update()
-                if  it % self.population_update_interval == 0:
+                if  it % self.population_update_interval == 0:  # NOTE: self-play
                     self.alg_ll.update_population()
                 stop_ll = time.time()
                 learn_time_ll = stop_ll - start_ll
@@ -345,8 +353,10 @@ class BimaOnPolicyRunner:
                         self.alg_hl.process_env_step(reward_ep_ll, dones, infos)
 
                         if self.log_dir is not None:
+
                             # Book keeping
                             if 'episode' in infos:
+                                infos["episode"]["rewards_hl"] = infos["episode"]["rewards"]
                                 ep_infos.append(infos['episode'])
                             if 'behavior' in infos:
                                 behavior_infos.append(infos['behavior'])
@@ -358,7 +368,7 @@ class BimaOnPolicyRunner:
                             cur_mean_reward_sum_hl[new_ids_hl] = 0
                             cur_episode_length_hl[new_ids_hl] = 0
 
-                        self.alg_hl.actor_critic.update_ac_ratings(infos)
+                        self.alg_hl.actor_critic.update_ac_ratings(infos)  # NOTE: self-play
 
                     stop_hl = time.time()
                     collection_time_hl = stop_hl - start_hl
@@ -368,7 +378,7 @@ class BimaOnPolicyRunner:
                     self.alg_hl.compute_returns(critic_obs)
                 
                 mean_value_loss_hl, mean_surrogate_loss_hl, mean_entropy_loss_hl, mean_stats_hl = self.alg_hl.update()
-                if  it % self.population_update_interval == 0:
+                if  it % self.population_update_interval == 0:  # NOTE: self-play
                     self.alg_hl.update_population()
                 stop_hl = time.time()
                 learn_time_hl = stop_hl - start_hl
