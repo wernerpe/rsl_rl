@@ -48,7 +48,7 @@ class BimaPPO:
                  value_loss_coef=1.0,
                  entropy_coef=0.0,
                  learning_rate=1e-3,
-                 max_grad_norm=1.0,
+                 max_grad_norm=2.0,
                  use_clipped_value_loss=True,
                  schedule="fixed",
                  desired_kl=0.01,
