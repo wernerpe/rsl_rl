@@ -164,6 +164,9 @@ class BimaPPO:
         mean_enc_wproj_a = 0
         mean_enc_wproj_c = 0
 
+        mean_returns = 0
+        mean_values = 0
+
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         elif self.actor_critic.is_attentive:
@@ -239,6 +242,8 @@ class BimaPPO:
                 # #since both entries the same pick team entry for agent 0 by convention
                 # value_loss_team = (returns_team_batch[:,0] - value_batch[:,0,1]).pow(2).mean()
             value_loss = value_loss_individual.mean()
+            returns_mean = returns_individual_batch.mean()
+            values_mean = value_batch.mean()
 
             loss = surrogate_loss + value_loss - self.entropy_coef * entropy_batch.mean()
 
@@ -261,6 +266,9 @@ class BimaPPO:
             mean_entropy_loss += entropy_batch.mean().item()
             mean_param_norm += param_norm.mean().item()
 
+            mean_returns += returns_mean.item()
+            mean_values += values_mean.item()
+
             mean_enc_wproj_a += self.actor_critic.teamacs[0].ac.actor._encoder.projection_net.weight.mean().item()
             mean_enc_wproj_c += self.actor_critic.teamacs[0].ac.critics[0]._encoder.projection_net.weight.mean().item()
 
@@ -278,6 +286,9 @@ class BimaPPO:
         mean_enc_wproj_a /= num_updates
         mean_enc_wproj_c /= num_updates
 
+        mean_returns /= num_updates
+        mean_values /= num_updates
+
         self.storage.clear()
 
         return mean_value_loss, mean_surrogate_loss, mean_entropy_loss, {'mean_joint_ratio_val': mean_joint_ratio_values, 
@@ -288,6 +299,8 @@ class BimaPPO:
                                                                           'mean_norm': mean_param_norm,
                                                                           'mean_encoder_wproj_actor': mean_enc_wproj_a,
                                                                           'mean_encoder_wproj_critic': mean_enc_wproj_c,
+                                                                          'mean_returns': mean_returns,
+                                                                          'mean_values': mean_values,
                                                                           }
 
     def update_population(self,):
