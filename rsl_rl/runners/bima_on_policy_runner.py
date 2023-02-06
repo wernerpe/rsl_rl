@@ -269,6 +269,8 @@ class BimaOnPolicyRunner:
 
                         obs_ll = torch.concat((obs, actions_hl), dim=-1)
                         critic_obs_ll = torch.concat((critic_obs, actions_hl), dim=-1)
+                        # obs_ll = obs
+                        # critic_obs_ll = critic_obs
                         actions_ll = self.alg_ll.act(obs_ll, critic_obs_ll)
                         self.env.set_ll_action_stats(self.alg_ll.actor_critic.action_mean, self.alg_ll.actor_critic.action_std)
 
@@ -431,11 +433,10 @@ class BimaOnPolicyRunner:
                     infotensor = torch.cat((infotensor, behavior_info[key].to(self.device)))
                 value = torch.mean(infotensor)
                 self.writer.add_scalar('Behavior/' + key, value, locs['it'])
-        mean_std_hl = self.alg_hl.actor_critic.std.mean()
-        mean_std_ll = self.alg_ll.actor_critic.std.mean()
         fps = int(steps_per_env * self.env.num_envs / (tot_time))
 
         if not log_ll:
+          mean_std_hl = self.alg_hl.actor_critic.std.mean()
           self.writer.add_scalar('Loss/value_function_hl', locs['mean_value_loss_hl'], locs['it'])
           self.writer.add_scalar('Loss/surrogate_hl', locs['mean_surrogate_loss_hl'], locs['it'])
           self.writer.add_scalar('Loss/entropy_hl', locs['mean_entropy_loss_hl'], locs['it'])
@@ -446,6 +447,7 @@ class BimaOnPolicyRunner:
           for key, value in locs['mean_stats_hl'].items():
               self.writer.add_scalar('Loss/' + key + '_hl', value, locs['it'])
         else:
+          mean_std_ll = self.alg_ll.actor_critic.std.mean()
           self.writer.add_scalar('Loss/value_function_ll', locs['mean_value_loss_ll'], locs['it'])
           self.writer.add_scalar('Loss/surrogate_ll', locs['mean_surrogate_loss_ll'], locs['it'])
           self.writer.add_scalar('Loss/entropy_ll', locs['mean_entropy_loss_ll'], locs['it'])
