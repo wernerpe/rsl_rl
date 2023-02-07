@@ -54,6 +54,7 @@ class MultiTeamBilevelActorCritic(nn.Module):
                         critic_hidden_dims=[256, 256, 256],
                         activation='elu',
                         init_noise_std=1.0,
+                        encoder_type = 'attention4',
                         **kwargs):
 
         super(MultiTeamBilevelActorCritic, self).__init__()
@@ -91,6 +92,7 @@ class MultiTeamBilevelActorCritic(nn.Module):
                                        activation='elu',
                                        init_noise_std=init_noise_std,
                                        team_size=self.team_size,
+                                       encoder_type = encoder_type,
                                        **kwargs) for idx in range(self.num_teams)]
 
         self.agentratings = []
@@ -295,6 +297,7 @@ class TeamBilevelActorCritic(nn.Module):
                         critic_output_dim=1,
                         activation='elu',
                         init_noise_std=1.0,
+                        encoder_type = 'attention4',
                         **kwargs):
         
         super(TeamBilevelActorCritic, self).__init__()
@@ -331,6 +334,7 @@ class TeamBilevelActorCritic(nn.Module):
                                     activation=activation,
                                     init_noise_std=init_noise_std,
                                     critic_output_dim=critic_output_dim,
+                                    encoder_type = encoder_type,
                                     **kwargs)
 
     def reset(self, dones=None):

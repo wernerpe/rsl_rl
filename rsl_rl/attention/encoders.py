@@ -128,7 +128,7 @@ class EncoderAttention3(nn.Module):
 
 class EncoderAttention4(nn.Module):
 
-  def __init__(self, num_ego_obs, num_ado_obs , hidden_dims, output_dim, numteams, teamsize, activation, device='cpu'):
+  def __init__(self, num_ego_obs, num_ado_obs , hidden_dims, output_dim, numteams, teamsize, activation):
 
         super(EncoderAttention4, self).__init__()
 
@@ -137,16 +137,18 @@ class EncoderAttention4(nn.Module):
         self.num_ado_obs = num_ado_obs
         self.teamsize = teamsize
 
-        self.team_ids = [team_id for team_id in range(numteams) for _ in range(teamsize)]
-        self.team_ids = torch.tensor(self.team_ids).to(device)
-
+        self.team_ids_list = [team_id for team_id in range(numteams) for _ in range(teamsize)]
+        team_ids = torch.tensor(self.team_ids_list, dtype=torch.float)
+        self.register_buffer('team_ids', team_ids)
+        # self.team_ids = self.team_ids.detach()
         # Parameters
         attention_heads = 4
         # hidden_dim = 32
         self.attend_dim = hidden_dims[-1] // attention_heads
 
-        self.attention_weights = torch.zeros((attention_heads, self.num_agents-1)).to(device)
-
+        attention_weights = torch.zeros((attention_heads, self.num_agents-1))
+        self.register_buffer('attention_weights', attention_weights)
+        #if want it to get grad updates, set as torch.nn.Parameter
 
         # EGO encoder
         ego_encoder_layers = []

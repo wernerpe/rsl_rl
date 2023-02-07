@@ -93,14 +93,15 @@ class BimaOnPolicyRunner:
         # num_ego_obs = self.policy_cfg['num_ego_obs']
         # num_ado_obs = self.policy_cfg['num_ado_obs']
 
-        encoder = get_encoder(
-            num_ego_obs=self.policy_cfg['num_ego_obs'], 
-            num_ado_obs=self.policy_cfg['num_ado_obs'], 
-            hidden_dims=encoder_hidden_dims, 
-            teamsize=teamsize,
-            numteams=numteams,
-            device=device,
-        )
+        encoder = None 
+        #get_encoder(
+        #     num_ego_obs=self.policy_cfg['num_ego_obs'], 
+        #     num_ado_obs=self.policy_cfg['num_ado_obs'], 
+        #     hidden_dims=encoder_hidden_dims, 
+        #     teamsize=teamsize,
+        #     numteams=numteams,
+        #     device=device,
+        # )
 
         actor_critic_class_hl = eval(self.cfg["policy_class_hl_name"]) # BilevelActorCritic
         actor_critic_hl: MultiTeamBilevelActorCritic = actor_critic_class_hl(

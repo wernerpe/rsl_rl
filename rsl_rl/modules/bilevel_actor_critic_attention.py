@@ -36,7 +36,7 @@ from torch.distributions import Normal
 from torch.distributions import OneHotCategorical, TransformedDistribution, AffineTransform
 from torch.nn.modules import rnn
 import torch.nn.functional as F
-
+from rsl_rl.attention.encoders import EncoderAttention1,EncoderAttention2, EncoderAttention3, EncoderAttention4 
 from rsl_rl.utils import TruncatedNormal, SquashedNormal
 
 # from rsl_rl.modules.attention.encoders import EncoderAttention4
@@ -80,6 +80,7 @@ class BilevelActorCriticAttention(nn.Module):
                         init_noise_std=1.0,
                         critic_output_dim=1,
                         std_per_dim=False,
+                        encoder_type = 'attention4',
                         **kwargs):
         if kwargs:
             print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
@@ -87,14 +88,23 @@ class BilevelActorCriticAttention(nn.Module):
 
         activation = get_activation(activation)
 
-        encoder_type = kwargs['encoder_type']
+        encoder_type = encoder_type #kwargs['encoder_type']
         encoder_hidden_dims = kwargs['encoder_hidden_dims']
-
+        num_ego_obs = kwargs['num_ego_obs']
+        num_ado_obs = kwargs['num_ado_obs']
+        
+        encodername = 'EncoderAttention' + encoder_type[-1]
+        encoder =  eval(encodername)(num_ego_obs=num_ego_obs, 
+                                    num_ado_obs=num_ado_obs, 
+                                    hidden_dims=kwargs['encoder_hidden_dims'], 
+                                    output_dim=num_ado_obs, 
+                                    numteams=kwargs['numteams'], 
+                                    teamsize=kwargs['teamsize'],
+                                    activation=activation)
         # teamsize = kwargs['teamsize']
         # numteams = kwargs['numteams']
 
-        num_ego_obs = kwargs['num_ego_obs']
-        num_ado_obs = kwargs['num_ado_obs']
+        
 
         self.n_critics = kwargs['numcritics']
         self.is_attentive = kwargs['attentive']
