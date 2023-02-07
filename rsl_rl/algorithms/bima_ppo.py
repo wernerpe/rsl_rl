@@ -308,13 +308,13 @@ class BimaPPO:
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         elif self.actor_critic.is_attentive:
-          generator = self.storage.attention_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+            generator = self.storage.attention_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         batch = next(generator)
         obs_batch = batch[0]
 
-        self.actor_critic.redraw_ac_networks_KL_divergence(obs_batch)
+        self.actor_critic.redraw_ac_networks_KL_divergence(obs_batch)  # FIXME: uncomment & fix
 
     def update_ratings(self, eval_ranks, eval_ep_duration, max_ep_len):
         eval_team_ranks = -100. * torch.ones_like(eval_ranks[..., :len(self.actor_critic.teams)])

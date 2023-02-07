@@ -45,6 +45,9 @@ from rsl_rl.env import VecEnv
 import yaml
 import os
 
+from torch.nn.utils import parameters_to_vector
+import copy
+
 
 class BimaOnPolicyRunner:
 
@@ -70,7 +73,6 @@ class BimaOnPolicyRunner:
         self.dt_hl = self.env.dt_hl
         self.iters_ado_ppc = env.iters_ado_ppc
 
-        self.iter_per_level = 100
         self.iter_per_hl = self.cfg["iter_per_hl"]
         self.iter_per_ll = self.cfg["iter_per_ll"]
 
@@ -93,14 +95,15 @@ class BimaOnPolicyRunner:
         # num_ego_obs = self.policy_cfg['num_ego_obs']
         # num_ado_obs = self.policy_cfg['num_ado_obs']
 
-        encoder = get_encoder(
+        encoders = [get_encoder(
             num_ego_obs=self.policy_cfg['num_ego_obs'], 
             num_ado_obs=self.policy_cfg['num_ado_obs'], 
             hidden_dims=encoder_hidden_dims, 
             teamsize=teamsize,
             numteams=numteams,
-            device=device,
-        )
+        )]
+        for _ in range(numteams-1):
+            encoders.append(copy.deepcopy(encoders[0]))
 
         actor_critic_class_hl = eval(self.cfg["policy_class_hl_name"]) # BilevelActorCritic
         actor_critic_hl: MultiTeamBilevelActorCritic = actor_critic_class_hl(
@@ -108,7 +111,7 @@ class BimaOnPolicyRunner:
                                                         num_critic_obs=num_critic_obs,
                                                         num_add_obs=0,
                                                         num_actions=self.num_actions_hl,
-                                                        encoder=encoder,
+                                                        encoders=encoders,
                                                         train_encoder=False,
                                                         act_min=act_min,
                                                         act_max=act_max,
@@ -122,7 +125,7 @@ class BimaOnPolicyRunner:
                                                         num_critic_obs=num_critic_obs,
                                                         num_add_obs=self.num_obs_add_ll,
                                                         num_actions=self.env.num_actions,
-                                                        encoder=encoder,
+                                                        encoders=encoders,
                                                         train_encoder=True,
                                                         device=device,
                                                         **self.policy_cfg).to(self.device)
@@ -220,6 +223,18 @@ class BimaOnPolicyRunner:
         cur_mean_team_reward_sum_ll = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length_ll = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
+        log_param_abs_delta = False
+        if log_param_abs_delta:
+            # Low-level
+            prev_param_vec_ll_actor = parameters_to_vector(self.alg_ll.actor_critic.teamacs[0].ac.actor._network.parameters()).detach()
+            prev_param_vec_ll_critic = parameters_to_vector(self.alg_ll.actor_critic.teamacs[0].ac.critics[0]._network.parameters()).detach()
+            prev_param_vec_ll_encoder = parameters_to_vector(self.alg_ll.actor_critic.teamacs[0].ac.actor._encoder.parameters()).detach()
+            # High-level
+            prev_param_vec_hl_actor = parameters_to_vector(self.alg_hl.actor_critic.teamacs[0].ac.actor._network.parameters()).detach()
+            prev_param_vec_hl_critic = parameters_to_vector(self.alg_hl.actor_critic.teamacs[0].ac.critics[0]._network.parameters()).detach()
+            prev_param_vec_hl_encoder = parameters_to_vector(self.alg_hl.actor_critic.teamacs[0].ac.actor._encoder.parameters()).detach()
+
+
         # Start with low-level training
         train_hl = False
         train_ll = True
@@ -230,7 +245,6 @@ class BimaOnPolicyRunner:
             if it > self.iters_ado_ppc:
                 self.env.set_steer_ado_ppc(False)
 
-            # if (it % self.iter_per_level)==0 and it>0:
             if it in iter_switch and it > self.pretrain_ll_iter:
                 train_ll = not train_ll
                 train_hl = not train_hl
@@ -274,7 +288,7 @@ class BimaOnPolicyRunner:
                         actions_ll = self.alg_ll.act(obs_ll, critic_obs_ll)
                         self.env.set_ll_action_stats(self.alg_ll.actor_critic.action_mean, self.alg_ll.actor_critic.action_std)
 
-                        self.env.viewer.update_attention(self.alg_ll.actor_critic.teamacs[0].ac.actor._encoder.attention_weights)
+                        # self.env.viewer.update_attention(self.alg_ll.actor_critic.teamacs[0].ac.actor._encoder.attention_weights)
 
                         obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
                         critic_obs = privileged_obs if privileged_obs is not None else obs
@@ -316,6 +330,34 @@ class BimaOnPolicyRunner:
                     self.alg_ll.update_population()
                 stop_ll = time.time()
                 learn_time_ll = stop_ll - start_ll
+
+                if log_param_abs_delta:
+                    # Low-level
+                    param_vec_ll_actor = parameters_to_vector(self.alg_ll.actor_critic.teamacs[0].ac.actor._network.parameters()).detach()
+                    param_vec_ll_critic = parameters_to_vector(self.alg_ll.actor_critic.teamacs[0].ac.critics[0]._network.parameters()).detach()
+                    param_vec_ll_encoder = parameters_to_vector(self.alg_ll.actor_critic.teamacs[0].ac.actor._encoder.parameters()).detach()
+
+                    param_vec_ll_actor_mean_diff = (param_vec_ll_actor - prev_param_vec_ll_actor).abs().mean()
+                    param_vec_ll_critic_mean_diff = (param_vec_ll_critic - prev_param_vec_ll_critic).abs().mean()
+                    param_vec_ll_encoder_mean_diff = (param_vec_ll_encoder - prev_param_vec_ll_encoder).abs().mean()
+
+                    prev_param_vec_ll_actor = param_vec_ll_actor
+                    prev_param_vec_ll_critic = param_vec_ll_critic
+                    prev_param_vec_ll_encoder = param_vec_ll_encoder
+
+                    # High-level
+                    param_vec_hl_actor = parameters_to_vector(self.alg_hl.actor_critic.teamacs[0].ac.actor._network.parameters()).detach()
+                    param_vec_hl_critic = parameters_to_vector(self.alg_hl.actor_critic.teamacs[0].ac.critics[0]._network.parameters()).detach()
+                    param_vec_hl_encoder = parameters_to_vector(self.alg_hl.actor_critic.teamacs[0].ac.actor._encoder.parameters()).detach()
+
+                    param_vec_hl_actor_mean_diff = (param_vec_hl_actor - prev_param_vec_hl_actor).abs().mean()
+                    param_vec_hl_critic_mean_diff = (param_vec_hl_critic - prev_param_vec_hl_critic).abs().mean()
+                    param_vec_hl_encoder_mean_diff = (param_vec_hl_encoder - prev_param_vec_hl_encoder).abs().mean()
+
+                    prev_param_vec_hl_actor = param_vec_hl_actor
+                    prev_param_vec_hl_critic = param_vec_hl_critic
+                    prev_param_vec_hl_encoder = param_vec_hl_encoder
+
                 if self.log_dir is not None:
                     self.log(locals(), self.num_steps_per_env_ll, log_ll=True)
                 # if it % self.save_interval == 0:
@@ -342,7 +384,7 @@ class BimaOnPolicyRunner:
                             critic_obs_ll = torch.concat((critic_obs, actions_hl), dim=-1)
                             actions_ll = self.alg_ll.act(obs_ll, critic_obs_ll)
 
-                            self.env.viewer.update_attention(self.alg_ll.actor_critic.teamacs[0].ac.actor._encoder.attention_weights)
+                            # self.env.viewer.update_attention(self.alg_ll.actor_critic.teamacs[0].ac.actor._encoder.attention_weights)
 
                             self.env.set_ll_action_stats(self.alg_ll.actor_critic.action_mean, self.alg_ll.actor_critic.action_std)
                             obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
@@ -433,6 +475,14 @@ class BimaOnPolicyRunner:
                     infotensor = torch.cat((infotensor, behavior_info[key].to(self.device)))
                 value = torch.mean(infotensor)
                 self.writer.add_scalar('Behavior/' + key, value, locs['it'])
+        if locs['param_vec_ll_actor_mean_diff'] is not None:
+            self.writer.add_scalar('Params/' + 'll_delta_actor', locs['param_vec_ll_actor_mean_diff'].unsqueeze(0).to(self.device), locs['it'])
+            self.writer.add_scalar('Params/' + 'll_delta_critic', locs['param_vec_ll_critic_mean_diff'].unsqueeze(0).to(self.device), locs['it'])
+            self.writer.add_scalar('Params/' + 'll_delta_encoder', locs['param_vec_ll_encoder_mean_diff'].unsqueeze(0).to(self.device), locs['it'])
+        if locs['param_vec_hl_actor_mean_diff'] is not None:
+            self.writer.add_scalar('Params/' + 'hl_delta_actor', locs['param_vec_hl_actor_mean_diff'].unsqueeze(0).to(self.device), locs['it'])
+            self.writer.add_scalar('Params/' + 'hl_delta_critic', locs['param_vec_hl_critic_mean_diff'].unsqueeze(0).to(self.device), locs['it'])
+            self.writer.add_scalar('Params/' + 'hl_delta_encoder', locs['param_vec_hl_encoder_mean_diff'].unsqueeze(0).to(self.device), locs['it'])
         fps = int(steps_per_env * self.env.num_envs / (tot_time))
 
         if not log_ll:
