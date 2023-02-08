@@ -44,7 +44,7 @@ class MultiTeamBilevelActorCritic(nn.Module):
                         # num_agents,
                         num_actions,
                         device,
-                        encoder,
+                        encoders,
                         train_encoder=False,
                         act_min=None,
                         act_max=None,
@@ -79,7 +79,7 @@ class MultiTeamBilevelActorCritic(nn.Module):
                                        num_add_obs,
                                        num_actions,
                                        device=device,
-                                       encoder=encoder,
+                                       encoder=encoders[idx],
                                        train_encoder=train_encoder,
                                        act_min=act_min,
                                        act_max=act_max,
@@ -104,7 +104,7 @@ class MultiTeamBilevelActorCritic(nn.Module):
         self.draw_probs_unnorm[0:-3] = 0.4/(self.max_num_models-3)
         self.draw_probs_unnorm[-3:] = 0.6/3
 
-        self.past_models = [self.teamacs[0].state_dict()]
+        self.past_models = [copy.deepcopy(self.teamacs[0].state_dict())]
         self.past_ratings_mu = [0]
         self.past_ratings_sigma = [self.agentratings[0][0].sigma]
 
@@ -233,7 +233,7 @@ class MultiTeamBilevelActorCritic(nn.Module):
         self.teamacs = current_models
         print('[MAAC POPULATION UPDATE] KLs', kl_divs)
 
-        if np.min(kl_divs)>0.05:
+        if np.min(kl_divs)>0.05:  # FIXME: put back and fix
             self.redraw_ac_networks(save = True)
         else:
             self.redraw_ac_networks(save = False)

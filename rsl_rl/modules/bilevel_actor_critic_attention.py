@@ -245,7 +245,7 @@ class BilevelActorCriticAttention(nn.Module):
             # One-hot Categorical
             logits_merged = self.actor(observations)
             logits = logits_merged.view((*logits_merged.shape[:-1], self.num_actions, self.num_bins))
-            logits = 10.0 * torch.tanh(logits / 2.0)  # 5.0,  10.0
+            logits = 2.0 * torch.tanh(logits / 2.0)  # 5.0,  10.0
 
             # # Add epsilon-greedy probabilities
             # epsilon = 0.0  # 0.1
