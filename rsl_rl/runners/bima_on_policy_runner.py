@@ -130,9 +130,9 @@ class BimaOnPolicyRunner:
                                                         device=device,
                                                         **self.policy_cfg).to(self.device)
         alg_class_hl = eval(self.cfg["algorithm_class_hl_name"]) # BilevelPPO
-        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=True, device=self.device, schedule="fixed", clip_param=0.1, entropy_coef=0.001, **self.alg_cfg)
+        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=True, device=self.device, schedule="adaptive", clip_param=0.1, entropy_coef=0.001, gamma=0.90, **self.alg_cfg)
         alg_class_ll = eval(self.cfg["algorithm_class_ll_name"]) # BilevelPPO
-        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=False, device=self.device, schedule="fixed", clip_param=0.2, entropy_coef=0.01, **self.alg_cfg)
+        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=False, device=self.device, schedule="adaptive", clip_param=0.2, entropy_coef=0.01, gamma=0.99, **self.alg_cfg)
 
         self.num_steps_per_env_hl = self.cfg["num_steps_per_env_hl"]
         self.num_steps_per_env_ll = self.cfg["num_steps_per_env_ll"]
@@ -224,6 +224,8 @@ class BimaOnPolicyRunner:
         cur_episode_length_ll = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
         log_param_abs_delta = False
+        param_vec_ll_actor_mean_diff, param_vec_ll_critic_mean_diff, param_vec_ll_encoder_mean_diff = None, None, None
+        param_vec_hl_actor_mean_diff, param_vec_hl_critic_mean_diff, param_vec_hl_encoder_mean_diff = None, None, None
         if log_param_abs_delta:
             # Low-level
             prev_param_vec_ll_actor = parameters_to_vector(self.alg_ll.actor_critic.teamacs[0].ac.actor._network.parameters()).detach()
