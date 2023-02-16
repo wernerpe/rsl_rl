@@ -85,9 +85,6 @@ class BimaOnPolicyRunner:
         act_max = self.env.action_max_hl
         act_ini = self.env.action_ini_hl
 
-        encoder_type = self.policy_cfg['encoder_type']
-        encoder_hidden_dims = self.policy_cfg['encoder_hidden_dims']
-
         teamsize = self.policy_cfg['teamsize']
         numteams = self.policy_cfg['numteams']
         self.num_agents = teamsize * numteams
@@ -95,12 +92,18 @@ class BimaOnPolicyRunner:
         # num_ego_obs = self.policy_cfg['num_ego_obs']
         # num_ado_obs = self.policy_cfg['num_ado_obs']
 
+        encoder_type = self.policy_cfg['encoder_type']
+        if encoder_type=='identity':
+            self.policy_cfg['encoder_hidden_dims'] = [self.env.num_obs]
+        encoder_hidden_dims = self.policy_cfg['encoder_hidden_dims']
+
         encoders = [get_encoder(
             num_ego_obs=self.policy_cfg['num_ego_obs'], 
             num_ado_obs=self.policy_cfg['num_ado_obs'], 
             hidden_dims=encoder_hidden_dims, 
             teamsize=teamsize,
             numteams=numteams,
+            encoder_type=encoder_type,
         )]
         for _ in range(numteams-1):
             encoders.append(copy.deepcopy(encoders[0]))
@@ -130,7 +133,7 @@ class BimaOnPolicyRunner:
                                                         device=device,
                                                         **self.policy_cfg).to(self.device)
         alg_class_hl = eval(self.cfg["algorithm_class_hl_name"]) # BilevelPPO
-        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=True, device=self.device, schedule="adaptive", clip_param=0.1, entropy_coef=0.001, gamma=0.90, **self.alg_cfg)
+        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=True, device=self.device, schedule="fixed", clip_param=0.1, entropy_coef=0.001, gamma=0.90, **self.alg_cfg)
         alg_class_ll = eval(self.cfg["algorithm_class_ll_name"]) # BilevelPPO
         self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=False, device=self.device, schedule="adaptive", clip_param=0.2, entropy_coef=0.01, gamma=0.99, **self.alg_cfg)
 
@@ -243,6 +246,8 @@ class BimaOnPolicyRunner:
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
         for it in range(self.current_learning_iteration, tot_iter):
+
+            self.env.set_dropout_prob(it)
 
             if it > self.iters_ado_ppc:
                 self.env.set_steer_ado_ppc(False)

@@ -79,7 +79,7 @@ class BilevelActorCriticAttention(nn.Module):
                         activation='elu',
                         init_noise_std=1.0,
                         critic_output_dim=1,
-                        std_per_dim=False,
+                        std_per_obs=True,
                         **kwargs):
         if kwargs:
             print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
@@ -102,12 +102,15 @@ class BilevelActorCriticAttention(nn.Module):
         # num_agent_max = num_agents
         num_ego_obs = num_ego_obs
         num_ado_obs = num_ado_obs
-        if encoder_type != 'attention4':
-            mlp_input_dim_a = num_ego_obs + 1*num_ado_obs
-            mlp_input_dim_c = num_ego_obs + 1*num_ado_obs
-        else:
+        if encoder_type=='identity':
+            mlp_input_dim_a = encoder_hidden_dims[-1]
+            mlp_input_dim_c = encoder_hidden_dims[-1]
+        elif encoder_type=='attention4':
             mlp_input_dim_a = num_ego_obs + encoder_hidden_dims[-1]
             mlp_input_dim_c = num_ego_obs + encoder_hidden_dims[-1]
+        else:
+            mlp_input_dim_a = num_ego_obs + 1*num_ado_obs
+            mlp_input_dim_c = num_ego_obs + 1*num_ado_obs
 
         # mlp_input_dim_a = num_ego_obs + 3*num_ado_obs  # FIXME: testing
         # mlp_input_dim_c = num_ego_obs + 3*num_ado_obs  # FIXME: testing
@@ -120,7 +123,7 @@ class BilevelActorCriticAttention(nn.Module):
         self.num_actions = num_actions
         self.mlp_output_dim_a = num_actions
 
-        self.std_per_dim = std_per_dim
+        self.std_per_obs = std_per_obs
         self.std_ini = init_noise_std
         self.std_min = 3.e-2  # 1.e-2
 
@@ -149,7 +152,7 @@ class BilevelActorCriticAttention(nn.Module):
                 self._mean_target_std_ini = nn.Parameter(torch.tensor(act_ini[2:]), requires_grad=False)
                 self._softplus = nn.Softplus()
 
-            if self.std_per_dim:
+            if self.std_per_obs:
                 self.mlp_output_dim_a *= 2
         
         # Policy
@@ -258,7 +261,7 @@ class BilevelActorCriticAttention(nn.Module):
             self.distribution = OneHotCategorical(logits=logits)
         else:
             # Gaussian
-            if self.std_per_dim:
+            if self.std_per_obs:
                 output_merged = self.actor(observations)
                 output = output_merged.view((*output_merged.shape[:-1], self.num_actions, 2))
                 mean_raw = output[..., 0]

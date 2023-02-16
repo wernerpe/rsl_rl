@@ -246,13 +246,33 @@ class EncoderAttention4(nn.Module):
       return new_obs
 
 
-def get_encoder(num_ego_obs, num_ado_obs, hidden_dims, teamsize, numteams, activation='leaky_relu'):
-    return EncoderAttention4(
-      num_ego_obs=num_ego_obs, 
-      num_ado_obs=num_ado_obs, 
-      hidden_dims=hidden_dims, 
-      output_dim=num_ado_obs, 
-      numteams=numteams, 
-      teamsize=teamsize,
-      activation=activation,
-    )
+class EncoderIdentity(nn.Module):
+
+  def __init__(self):
+
+        super(EncoderIdentity, self).__init__()
+
+  def forward(self, observations):
+
+      return observations
+
+
+def get_encoder(num_ego_obs, num_ado_obs, hidden_dims, teamsize, numteams, encoder_type, activation='leaky_relu'):
+
+    encoder = None
+
+    if encoder_type=='identity':
+        encoder = EncoderIdentity()
+    elif encoder_type=='attention4':
+        encoder = EncoderAttention4(
+          num_ego_obs=num_ego_obs, 
+          num_ado_obs=num_ado_obs, 
+          hidden_dims=hidden_dims, 
+          output_dim=num_ado_obs, 
+          numteams=numteams, 
+          teamsize=teamsize,
+          activation=activation,
+        )
+    else:
+        raise NotImplementedError
+    return encoder

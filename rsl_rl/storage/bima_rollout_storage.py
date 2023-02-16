@@ -154,7 +154,8 @@ class BimaRolloutStorage:
             self.returns[step] = advantage + self.values[step]
 
         # Compute and normalize the advantages
-        self.advantages = torch.sum(self.returns - self.values, dim = (-2,-1))  # NOTE: check whether double sum good
+        # self.advantages = torch.sum(self.returns - self.values, dim = (-2,-1))  # NOTE: check whether double sum good
+        self.advantages = self.returns - self.values  # NOTE: same shape as returns/values, no reduction
         # self.advantages = self.advantages.mean(dim=2) - 0.5 * self.advantages.std(dim=2)
         self.advantages = (self.advantages - self.advantages.mean()) / (self.advantages.std() + 1e-8)
 

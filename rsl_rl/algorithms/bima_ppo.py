@@ -167,6 +167,8 @@ class BimaPPO:
         mean_returns = 0
         mean_values = 0
 
+        mean_kl = 0
+
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         elif self.actor_critic.is_attentive:
@@ -192,26 +194,41 @@ class BimaPPO:
                     if kl_mean > self.desired_kl * 2.0:
                         self.learning_rate = max(1e-5, self.learning_rate / 1.5)
                     elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
-                        self.learning_rate = min(1e-2, self.learning_rate * 1.5)
+                        self.learning_rate = min(1e-3, self.learning_rate * 1.5)  # 1e-2
                     
                     for param_group in self.optimizer.param_groups:
                         param_group['lr'] = self.learning_rate
 
 
-            # Surrogate loss
-            ratio = torch.squeeze(torch.exp(torch.sum(actions_log_prob_batch, dim = 1) - torch.sum(old_actions_log_prob_batch.squeeze(-1), dim = 1)))
-            surrogate = -torch.squeeze(advantages_batch) * ratio
-            surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(ratio, 1.0 - self.clip_param,
-                                                                            1.0 + self.clip_param)
-            surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
+            # # Surrogate loss
+            # ratio = torch.squeeze(torch.exp(torch.sum(actions_log_prob_batch, dim = 1) - torch.sum(old_actions_log_prob_batch.squeeze(-1), dim = 1)))
+            # surrogate = -torch.squeeze(advantages_batch) * ratio
+            # surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(ratio, 1.0 - self.clip_param,
+            #                                                                 1.0 + self.clip_param)
+            # surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
 
             # Centralization via mean
             if self.centralized_value:
                 value_batch = value_batch.squeeze(dim=-1).mean(dim=-1)
                 target_values_individual_batch = target_values_individual_batch.mean(dim=-1)
                 returns_individual_batch = returns_individual_batch.mean(dim=-1)
+
+                actions_log_prob_batch = actions_log_prob_batch.sum(dim=1)
+                old_actions_log_prob_batch = old_actions_log_prob_batch.squeeze(dim=-1).sum(dim=1)
+                advantages_batch = advantages_batch.squeeze(dim=-1).mean(dim=-1)
             else:
                 value_batch = value_batch.squeeze(dim=-1)
+
+                actions_log_prob_batch = actions_log_prob_batch.flatten(0, 1)
+                old_actions_log_prob_batch = old_actions_log_prob_batch.squeeze(dim=-1).flatten(0, 1)
+                advantages_batch = advantages_batch.squeeze(dim=-1).flatten(0, -1)
+
+            # Surrogate loss
+            ratio = torch.squeeze(torch.exp(actions_log_prob_batch - old_actions_log_prob_batch))
+            surrogate = -torch.squeeze(advantages_batch) * ratio
+            surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(ratio, 1.0 - self.clip_param,
+                                                                            1.0 + self.clip_param)
+            surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
 
             # Value function loss
             if self.use_clipped_value_loss:
@@ -260,8 +277,8 @@ class BimaPPO:
             mean_surrogate_loss += surrogate_loss.item()
             mean_joint_ratio_values += ratio.mean().item()
             mean_advantage_values += advantages_batch.mean().item()
-            mean_jr_num += torch.sum(actions_log_prob_batch, dim = 1).mean().item()
-            mean_jr_den += torch.sum(old_actions_log_prob_batch, dim = 1).mean().item()
+            mean_jr_num += actions_log_prob_batch.mean().item()
+            mean_jr_den += old_actions_log_prob_batch.mean().item()
             mean_mu0_batch += mu_batch[:, 0].mean().item()
             mean_entropy_loss += entropy_batch.mean().item()
             mean_param_norm += param_norm.mean().item()
@@ -269,8 +286,10 @@ class BimaPPO:
             mean_returns += returns_mean.item()
             mean_values += values_mean.item()
 
-            mean_enc_wproj_a += self.actor_critic.teamacs[0].ac.actor._encoder.projection_net.weight.mean().item()
-            mean_enc_wproj_c += self.actor_critic.teamacs[0].ac.critics[0]._encoder.projection_net.weight.mean().item()
+            mean_kl += kl_mean.item()
+
+            # mean_enc_wproj_a += self.actor_critic.teamacs[0].ac.actor._encoder.projection_net.weight.mean().item()
+            # mean_enc_wproj_c += self.actor_critic.teamacs[0].ac.critics[0]._encoder.projection_net.weight.mean().item()
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
@@ -289,6 +308,8 @@ class BimaPPO:
         mean_returns /= num_updates
         mean_values /= num_updates
 
+        mean_kl /= num_updates
+
         self.storage.clear()
 
         return mean_value_loss, mean_surrogate_loss, mean_entropy_loss, {'mean_joint_ratio_val': mean_joint_ratio_values, 
@@ -301,6 +322,7 @@ class BimaPPO:
                                                                           'mean_encoder_wproj_critic': mean_enc_wproj_c,
                                                                           'mean_returns': mean_returns,
                                                                           'mean_values': mean_values,
+                                                                          'mean_kl': mean_kl,
                                                                           }
 
     def update_population(self,):
