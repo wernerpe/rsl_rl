@@ -192,12 +192,14 @@ class BimaPPO:
                     kl_mean = torch.mean(kl)
 
                     if kl_mean > self.desired_kl * 2.0:
-                        self.learning_rate = max(1e-5, self.learning_rate / 1.5)
+                        self.learning_rate = max(5e-5, self.learning_rate / 1.5)  # 1e-5
                     elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
                         self.learning_rate = min(1e-3, self.learning_rate * 1.5)  # 1e-2
                     
                     for param_group in self.optimizer.param_groups:
                         param_group['lr'] = self.learning_rate
+            else:
+                kl_mean = -1.0 + 0.0*torch.mean(sigma_batch)
 
 
             # # Surrogate loss
@@ -217,11 +219,13 @@ class BimaPPO:
                 old_actions_log_prob_batch = old_actions_log_prob_batch.squeeze(dim=-1).sum(dim=1)
                 advantages_batch = advantages_batch.squeeze(dim=-1).mean(dim=-1)
             else:
-                value_batch = value_batch.squeeze(dim=-1)
+                value_batch = value_batch.squeeze(dim=-1)  # [..., 0]
+                # target_values_individual_batch = target_values_individual_batch[..., 0]
+                # returns_individual_batch = returns_individual_batch[..., 0]
 
-                actions_log_prob_batch = actions_log_prob_batch.flatten(0, 1)
-                old_actions_log_prob_batch = old_actions_log_prob_batch.squeeze(dim=-1).flatten(0, 1)
-                advantages_batch = advantages_batch.squeeze(dim=-1).flatten(0, -1)
+                actions_log_prob_batch = actions_log_prob_batch.flatten(0, 1)  # [..., 0]
+                old_actions_log_prob_batch = old_actions_log_prob_batch.squeeze(dim=-1).flatten(0, 1)  # [..., 0]
+                advantages_batch = advantages_batch.squeeze(dim=-1).squeeze(dim=1).flatten(0, -1)  # [..., 0]
 
             # Surrogate loss
             ratio = torch.squeeze(torch.exp(actions_log_prob_batch - old_actions_log_prob_batch))

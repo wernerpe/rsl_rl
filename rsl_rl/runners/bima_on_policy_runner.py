@@ -213,6 +213,7 @@ class BimaOnPolicyRunner:
 
         ep_infos = []
         behavior_infos = []
+        observation_infos = []
         rewbuffer_hl = deque(maxlen=100)
         trewbuffer_hl = deque(maxlen=100)
         lenbuffer_hl = deque(maxlen=100)
@@ -248,6 +249,7 @@ class BimaOnPolicyRunner:
         for it in range(self.current_learning_iteration, tot_iter):
 
             self.env.set_dropout_prob(it)
+            self.env.set_video_log_ep(it)
 
             if it > self.iters_ado_ppc:
                 self.env.set_steer_ado_ppc(False)
@@ -294,6 +296,7 @@ class BimaOnPolicyRunner:
                         # critic_obs_ll = critic_obs
                         actions_ll = self.alg_ll.act(obs_ll, critic_obs_ll)
                         self.env.set_ll_action_stats(self.alg_ll.actor_critic.action_mean, self.alg_ll.actor_critic.action_std)
+                        self.env.set_ll_values_preds(self.alg_ll.transition.values.squeeze(dim=1))
 
                         # self.env.viewer.update_attention(self.alg_ll.actor_critic.teamacs[0].ac.actor._encoder.attention_weights)
 
@@ -312,6 +315,8 @@ class BimaOnPolicyRunner:
                                 ep_infos.append(infos['episode'])
                             if 'behavior' in infos:
                                 behavior_infos.append(infos['behavior'])
+                            if 'observations' in infos:
+                                observation_infos.append(infos['observations'])
                             cur_mean_reward_sum_ll += torch.sum(torch.mean(rewards[:, self.alg_ll.actor_critic.teams[0], :], dim = 1), dim = 1)
                             # cur_mean_team_reward_sum_ll += torch.mean(rewards[:, self.alg_ll.teams[0], 1], dim = 1)
                             cur_episode_length_ll += 1
@@ -411,6 +416,8 @@ class BimaOnPolicyRunner:
                                 ep_infos.append(infos['episode'])
                             if 'behavior' in infos:
                                 behavior_infos.append(infos['behavior'])
+                            if 'observations' in infos:
+                                observation_infos.append(infos['observations'])
                             cur_mean_reward_sum_hl += torch.sum(torch.mean(reward_ep_ll[:, self.alg_ll.actor_critic.teams[0], :], dim = 1), dim = 1)
                             cur_episode_length_hl += self.dt_hl
                             new_ids_hl = (dones > 0).nonzero(as_tuple=False)
@@ -456,32 +463,53 @@ class BimaOnPolicyRunner:
         self.tot_time += tot_time
         iteration_time = tot_time
 
+
+        def write_tf_data(name, field, string):
+            if locs[name]:
+                for key in locs[name][0]:
+                    infotensor = torch.tensor([], device=self.device)
+                    for info in locs[name]:
+                        # handle scalar and zero dimensional tensor infos
+                        if not isinstance(info[key], torch.Tensor):
+                            info[key] = torch.Tensor([info[key]])
+                        if len(info[key].shape) == 0:
+                            info[key] = info[key].unsqueeze(0)
+                        infotensor = torch.cat((infotensor, info[key].to(self.device)))
+                    value = torch.mean(infotensor)
+                    self.writer.add_scalar(field + '/' + key, value, locs['it'])
+                    string += f"""{f'Mean ' + field + f' {key}:':>{pad}} {value:.4f}\n"""
+            return string
+
         ep_string = f''
-        if locs['ep_infos']:
-            for key in locs['ep_infos'][0]:
-                infotensor = torch.tensor([], device=self.device)
-                for ep_info in locs['ep_infos']:
-                    # handle scalar and zero dimensional tensor infos
-                    if not isinstance(ep_info[key], torch.Tensor):
-                        ep_info[key] = torch.Tensor([ep_info[key]])
-                    if len(ep_info[key].shape) == 0:
-                        ep_info[key] = ep_info[key].unsqueeze(0)
-                    infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
-                value = torch.mean(infotensor)
-                self.writer.add_scalar('Episode/' + key, value, locs['it'])
-                ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
-        if locs['behavior_infos']:
-            for key in locs['behavior_infos'][0]:
-                infotensor = torch.tensor([], device=self.device)
-                for behavior_info in locs['behavior_infos']:
-                    # handle scalar and zero dimensional tensor infos
-                    if not isinstance(behavior_info[key], torch.Tensor):
-                        behavior_info[key] = torch.Tensor([behavior_info[key]])
-                    if len(behavior_info[key].shape) == 0:
-                        behavior_info[key] = behavior_info[key].unsqueeze(0)
-                    infotensor = torch.cat((infotensor, behavior_info[key].to(self.device)))
-                value = torch.mean(infotensor)
-                self.writer.add_scalar('Behavior/' + key, value, locs['it'])
+        ep_string = write_tf_data('ep_infos', 'Episode', ep_string)
+        _ = write_tf_data('behavior_infos', 'Behavior', ep_string)
+        _ = write_tf_data('observation_infos', 'Observations', ep_string)
+        # if locs['ep_infos']:
+        #     for key in locs['ep_infos'][0]:
+        #         infotensor = torch.tensor([], device=self.device)
+        #         for ep_info in locs['ep_infos']:
+        #             # handle scalar and zero dimensional tensor infos
+        #             if not isinstance(ep_info[key], torch.Tensor):
+        #                 ep_info[key] = torch.Tensor([ep_info[key]])
+        #             if len(ep_info[key].shape) == 0:
+        #                 ep_info[key] = ep_info[key].unsqueeze(0)
+        #             infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
+        #         value = torch.mean(infotensor)
+        #         self.writer.add_scalar('Episode/' + key, value, locs['it'])
+        #         ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+        # if locs['behavior_infos']:
+        #     for key in locs['behavior_infos'][0]:
+        #         infotensor = torch.tensor([], device=self.device)
+        #         for behavior_info in locs['behavior_infos']:
+        #             # handle scalar and zero dimensional tensor infos
+        #             if not isinstance(behavior_info[key], torch.Tensor):
+        #                 behavior_info[key] = torch.Tensor([behavior_info[key]])
+        #             if len(behavior_info[key].shape) == 0:
+        #                 behavior_info[key] = behavior_info[key].unsqueeze(0)
+        #             infotensor = torch.cat((infotensor, behavior_info[key].to(self.device)))
+        #         value = torch.mean(infotensor)
+        #         self.writer.add_scalar('Behavior/' + key, value, locs['it'])
+          
         if locs['param_vec_ll_actor_mean_diff'] is not None:
             self.writer.add_scalar('Params/' + 'll_delta_actor', locs['param_vec_ll_actor_mean_diff'].unsqueeze(0).to(self.device), locs['it'])
             self.writer.add_scalar('Params/' + 'll_delta_critic', locs['param_vec_ll_critic_mean_diff'].unsqueeze(0).to(self.device), locs['it'])
