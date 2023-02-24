@@ -79,7 +79,7 @@ class BilevelActorCriticAttention(nn.Module):
                         activation='elu',
                         init_noise_std=1.0,
                         critic_output_dim=1,
-                        std_per_obs=True,
+                        # std_per_obs=True,
                         **kwargs):
         if kwargs:
             print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
@@ -123,7 +123,7 @@ class BilevelActorCriticAttention(nn.Module):
         self.num_actions = num_actions
         self.mlp_output_dim_a = num_actions
 
-        self.std_per_obs = std_per_obs
+        self.std_per_obs = kwargs['std_per_obs']
         self.std_ini = init_noise_std
         self.std_min = 3.e-2  # 1.e-2
 
@@ -180,7 +180,7 @@ class BilevelActorCriticAttention(nn.Module):
         print(f"Critic MLP: {self.critics[0]}")
 
         # Action noise
-        self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+        self.std = nn.Parameter((init_noise_std-self.std_min) * torch.ones(num_actions) + self.std_min)
         self.distribution = None
         # disable args validation for speedup
         Normal.set_default_validate_args = False
@@ -379,7 +379,7 @@ class ActorAttention(nn.Module):
 
 class CriticAttention(nn.Module):
   
-    def __init__(self, input_dim, hidden_dims, split_dim, activation, encoder, output_dims=1, train_encoder=False):
+    def __init__(self, input_dim, hidden_dims, split_dim, activation, encoder, output_dims=1, train_encoder=False, distributional=False):
 
         super(CriticAttention, self).__init__()
 
@@ -387,6 +387,15 @@ class CriticAttention(nn.Module):
 
         self._encoder = encoder
         self._train_encoder = train_encoder
+        self._distributional = distributional
+        self._output_dims = output_dims
+        self._num_atoms = 51
+        self._v_min = -10.0
+        self._v_max = +10.0
+
+        if self._distributional:
+            output_dims *= self._num_atoms
+            self._atoms = torch.linspace(self._v_min, self._v_max, self._num_atoms)
   
         critic_layers = []
         critic_layers.append(nn.Linear(input_dim, hidden_dims[0]))
@@ -410,7 +419,13 @@ class CriticAttention(nn.Module):
             latent = latent.detach()
         obs = torch.concat((latent, obs2), dim=-1)
         # obs = observations  # FIXME: testing
-        return self._network(obs)
+        if self._distributional:
+            logits = self._network(obs).view(-1, self._output_dims, self._num_atoms)
+            v_dist = torch.softmax(logits)
+            v_vals = (v_dist * self._atoms).sum(dim=-1).detach()
+            return v_vals, logits
+        else:
+            return self._network(obs)
 
 
 def get_activation(act_name):
