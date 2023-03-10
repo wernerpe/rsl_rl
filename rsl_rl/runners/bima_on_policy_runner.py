@@ -36,10 +36,10 @@ import statistics
 from torch.utils.tensorboard import SummaryWriter
 import torch
 
-from rsl_rl.algorithms import BimaPPO
+from rsl_rl.algorithms import BimaPPO, BimaDecSARSA
 # from rsl_rl.modules import BilevelActorCriticAttention, get_encoder
 from rsl_rl.attention import get_encoder
-from rsl_rl.modules import MultiTeamBilevelActorCritic, TeamBilevelActorCritic
+from rsl_rl.modules import MultiTeamBilevelActorCritic, TeamBilevelActorCritic, MultiTeamBilevelDecCritic
 from rsl_rl.env import VecEnv
 
 import yaml
@@ -94,13 +94,16 @@ class BimaOnPolicyRunner:
 
         encoder_type = self.policy_cfg['encoder_type']
         if encoder_type=='identity':
-            self.policy_cfg['encoder_hidden_dims'] = [self.env.num_obs]
-        encoder_hidden_dims = self.policy_cfg['encoder_hidden_dims']
+            self.policy_cfg['encoder_embed_dims'] = [-1]
+            self.policy_cfg['encoder_attend_dims'] = [self.env.num_obs]
+        encoder_embed_dims = self.policy_cfg['encoder_embed_dims']
+        encoder_attend_dims = self.policy_cfg['encoder_attend_dims']
 
         encoders = [get_encoder(
             num_ego_obs=self.policy_cfg['num_ego_obs'], 
             num_ado_obs=self.policy_cfg['num_ado_obs'], 
-            hidden_dims=encoder_hidden_dims, 
+            embed_dims=encoder_embed_dims,
+            attend_dims=encoder_attend_dims, 
             teamsize=teamsize,
             numteams=numteams,
             encoder_type=encoder_type,
@@ -250,9 +253,10 @@ class BimaOnPolicyRunner:
 
             self.env.set_dropout_prob(it)
             self.env.set_video_log_ep(it)
+            self.env.set_ppc_prob(it)
 
-            if it > self.iters_ado_ppc:
-                self.env.set_steer_ado_ppc(False)
+            # if it > self.iters_ado_ppc:
+            #     self.env.set_steer_ado_ppc(False)
 
             if it in iter_switch and it > self.pretrain_ll_iter:
                 train_ll = not train_ll
@@ -406,7 +410,10 @@ class BimaOnPolicyRunner:
                                 rewards = rewards[:, :, 0].unsqueeze(dim=-1)
                             reward_ep_ll += rewards  # .squeeze()
                         
-                        self.alg_hl.process_env_step(reward_ep_ll, dones, infos)
+                        if 'PPO' in self.cfg["algorithm_class_hl_name"]:
+                            self.alg_hl.process_env_step(reward_ep_ll, dones, infos)
+                        elif 'SARSA' in self.cfg["algorithm_class_hl_name"]:
+                            self.alg_hl.process_env_step(reward_ep_ll, obs, dones, infos)
 
                         if self.log_dir is not None:
 

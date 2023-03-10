@@ -88,7 +88,7 @@ class BilevelActorCriticAttention(nn.Module):
         activation = get_activation(activation)
 
         encoder_type = kwargs['encoder_type']
-        encoder_hidden_dims = kwargs['encoder_hidden_dims']
+        encoder_attend_dims = kwargs['encoder_attend_dims']
 
         # teamsize = kwargs['teamsize']
         # numteams = kwargs['numteams']
@@ -103,11 +103,11 @@ class BilevelActorCriticAttention(nn.Module):
         num_ego_obs = num_ego_obs
         num_ado_obs = num_ado_obs
         if encoder_type=='identity':
-            mlp_input_dim_a = encoder_hidden_dims[-1]
-            mlp_input_dim_c = encoder_hidden_dims[-1]
+            mlp_input_dim_a = encoder_attend_dims[-1]
+            mlp_input_dim_c = encoder_attend_dims[-1]
         elif encoder_type=='attention4':
-            mlp_input_dim_a = num_ego_obs + encoder_hidden_dims[-1]
-            mlp_input_dim_c = num_ego_obs + encoder_hidden_dims[-1]
+            mlp_input_dim_a = num_ego_obs + encoder_attend_dims[-1] // 4  # //heads for new version
+            mlp_input_dim_c = num_ego_obs + encoder_attend_dims[-1] // 4  # //heads for new version
         else:
             mlp_input_dim_a = num_ego_obs + 1*num_ado_obs
             mlp_input_dim_c = num_ego_obs + 1*num_ado_obs

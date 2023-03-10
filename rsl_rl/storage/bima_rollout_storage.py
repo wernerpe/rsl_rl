@@ -304,3 +304,117 @@ class BimaRolloutStorage:
                 #active_agents_batch = active_agents[batch_idx]
                 yield obs_batch, critic_observations_batch, actions_batch, target_values_individual_batch, advantages_batch, returns_individual_batch, \
                        old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (None, None), None, None
+
+
+# ############################ SARSA Storage #####################################
+
+class BimaSARSAStorage:
+    class Transition:
+        def __init__(self):
+            self.observations = None
+            self.actions = None
+            self.rewards = None
+            self.next_observations = None
+            self.dones = None
+            self.target_next_values = None
+            self.target_curr_values = None
+        
+        def clear(self):
+            self.__init__()
+
+        def squeeze_single_dims(self):
+            for k in self.__dict__:
+                if k != "hidden_states":
+                    # setattr(self, k, getattr(self, k).squeeze(dim=1))
+                    setattr(self, k, getattr(self, k)[:, 0])
+            return self
+
+    def __init__(self, num_envs, num_transitions_per_env, obs_shape, actions_shape, num_agents, num_critics, num_bins=-1, device='cpu'):
+
+        self.device = device
+
+        self.obs_shape = obs_shape
+        self.actions_shape = actions_shape
+        self.num_agents = num_agents
+
+        # Core
+        self.observations = torch.zeros(num_transitions_per_env, num_envs, num_agents, *obs_shape, device=self.device)
+        self.rewards = torch.zeros(num_transitions_per_env, num_envs, num_agents, 1, device=self.device)
+        self.actions = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, device=self.device)
+        self.next_observations = torch.zeros(num_transitions_per_env, num_envs, num_agents, *obs_shape, device=self.device)
+        self.dones = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device).byte()
+        self.target_curr_values = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, num_bins, device=self.device)
+        self.target_next_values = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, num_bins, device=self.device)
+
+        self.num_transitions_per_env = num_transitions_per_env
+        self.num_envs = num_envs
+
+        # attention
+        self.active_agents = torch.zeros(num_transitions_per_env, num_envs, num_agents, device=self.device)
+
+        self.step = 0
+
+    def add_transitions(self, transition: Transition):
+        if self.step >= self.num_transitions_per_env:
+            raise AssertionError("Rollout buffer overflow")
+        self.observations[self.step].copy_(transition.observations)
+        self.actions[self.step].copy_(transition.actions)
+        self.rewards[self.step].copy_(transition.rewards)
+        self.next_observations[self.step].copy_(transition.next_observations)
+        self.dones[self.step].copy_(transition.dones.view(-1, 1))
+        self.target_curr_values[self.step].copy_(transition.target_curr_values)
+        self.target_next_values[self.step].copy_(transition.target_next_values)
+        self.step += 1
+
+    def _save_active_agents(self, active_agents):
+        if active_agents is None:
+            return
+
+        self.active_agents[self.step].copy_(active_agents)
+
+    def clear(self):
+        self.step = 0
+
+    def compute_returns(self, last_values, gamma, lam):
+        pass
+
+    def get_statistics(self):
+        done = self.dones
+        done[-1] = 1
+        flat_dones = done.permute(1, 0, 2).reshape(-1, 1)
+        done_indices = torch.cat((flat_dones.new_tensor([-1], dtype=torch.int64), flat_dones.nonzero(as_tuple=False)[:, 0]))
+        trajectory_lengths = (done_indices[1:] - done_indices[:-1])
+        return trajectory_lengths.float().mean(), self.rewards.mean()
+
+    # for Attention only
+    def attention_mini_batch_generator(self, num_mini_batches, num_epochs=8):
+
+        batch_size = self.num_envs * self.num_transitions_per_env
+        mini_batch_size = batch_size // num_mini_batches
+        indices = torch.randperm(num_mini_batches*mini_batch_size, requires_grad=False, device=self.device)
+
+        observations = self.observations.flatten(0, 1)
+        actions = self.actions.flatten(0, 1)
+        rewards = self.rewards.flatten(0, 1)
+        next_observations = self.next_observations.flatten(0, 1)
+        dones = self.dones.flatten(0, 1)
+        target_curr_values = self.target_curr_values.flatten(0, 1)
+        target_next_values = self.target_next_values.flatten(0, 1)
+
+        active_agents = self.active_agents.flatten(0, 1)
+
+        for epoch in range(num_epochs):
+            for i in range(num_mini_batches):
+
+                start = i*mini_batch_size
+                end = (i+1)*mini_batch_size
+                batch_idx = indices[start:end]
+
+                observations_batch = observations[batch_idx]
+                actions_batch = actions[batch_idx]
+                rewards_batch = rewards[batch_idx]
+                next_observations_batch = next_observations[batch_idx]
+                dones_batch = dones[batch_idx]
+                target_curr_values_batch = target_curr_values[batch_idx]
+                target_next_values_batch = target_next_values[batch_idx]
+                yield observations_batch, actions_batch, rewards_batch, next_observations_batch, dones_batch, target_curr_values_batch, target_next_values_batch
