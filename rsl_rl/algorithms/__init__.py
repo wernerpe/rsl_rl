@@ -32,6 +32,7 @@ from .ppo import PPO
 from .hierarchical_ppo import HierarchicalPPO
 from .bilevel_ppo import BilevelPPO
 from .bima_ppo import BimaPPO
+from .bima_decsarsa import BimaDecSARSA
 
 #fully independent learning
 from .independent_multi_agent_ppo import IMAPPO

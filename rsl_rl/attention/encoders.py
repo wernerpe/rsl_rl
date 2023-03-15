@@ -246,6 +246,160 @@ class EncoderAttention4(nn.Module):
       return new_obs
 
 
+class Head(nn.Module):
+    """ one head of cross-attention """
+
+    def __init__(self, ego_size, ado_size, head_size):
+        super().__init__()
+        self.ado_key = nn.Linear(ado_size, head_size, bias=False)
+        self.ego_query = nn.Linear(ego_size, head_size, bias=False)
+        self.ado_value = nn.Sequential(nn.Linear(ado_size, head_size), nn.LeakyReLU())
+
+    def forward(self, x_ego, x_ado):
+        # x_ego: [B, 1, Ce]
+        # x_ado: [B, O, Ca]
+        k = self.ado_key(x_ado)    # [B, 1, hs]
+        q = self.ego_query(x_ego)  # [B, O, hs]
+        # compute attention scores ("affinities")
+        watt = q @ k.transpose(-2,-1) * k.shape[-1]**-0.5 # (B, 1, hs) @ (B, hs, O) -> (B, 1, O)
+        watt = F.softmax(watt, dim=-1) # (B, 1, O)
+        # perform the weighted aggregation of the values
+        v = self.ado_value(x_ado)   # (B, O, hs)
+        out = watt @ v # (B, 1, O) @ (B, O, hs) -> (B, 1, hs)
+        return out
+
+
+class MultiHeadAttention(nn.Module):
+    """ multiple heads of self-attention in parallel """
+
+    def __init__(self, ego_size, ado_size, n_embd, num_heads, head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(ego_size, ado_size, head_size) for _ in range(num_heads)])
+        self.proj = nn.Linear(head_size * num_heads, n_embd)
+
+    def forward(self, x_ego, x_ado):
+        out = torch.cat([h(x_ego, x_ado) for h in self.heads], dim=-1)
+        out = self.proj(out)
+        return out
+
+
+class FeedFoward(nn.Module):
+    """ a simple linear layer followed by a non-linearity """
+
+    def __init__(self, n_embd):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(n_embd, 4 * n_embd),
+            nn.ReLU(),
+            nn.Linear(4 * n_embd, n_embd),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class Block(nn.Module):
+    """ Transformer block: communication followed by computation """
+
+    def __init__(self, ego_size, ado_size, n_embd, n_head):
+        # n_embd: embedding dimension, n_head: the number of heads we'd like
+        super().__init__()
+        head_size = n_embd // n_head
+        self.sa = MultiHeadAttention(ego_size, ado_size, n_embd, n_head, head_size)
+        self.ffwd = FeedFoward(n_embd)
+        self.ln1_ego = nn.LayerNorm(ego_size)
+        self.ln1_ado = nn.LayerNorm(ado_size)
+        self.ln2 = nn.LayerNorm(n_embd)
+
+    def forward(self, x_ego, x_ado):
+        x_ego = self.ln1_ego(x_ego)  # TODO: where to out LayerNorm
+        x_ado = self.ln1_ado(x_ado)
+        x = self.sa(x_ego, x_ado)
+        x = x + self.ffwd(self.ln2(x))
+        return x
+
+
+
+class EncoderAttention4v2(nn.Module):
+
+  def __init__(self, num_ego_obs, num_ado_obs, embed_dims, attend_dims, output_dim, numteams, teamsize, activation):
+
+        super(EncoderAttention4v2, self).__init__()
+
+        self.num_agents = numteams * teamsize
+        self.num_ego_obs = num_ego_obs
+        self.num_ado_obs = num_ado_obs
+        self.teamsize = teamsize
+
+        self.team_ids_list = [team_id for team_id in range(numteams) for _ in range(teamsize)]
+        team_ids = torch.tensor(self.team_ids_list, dtype=torch.float)
+        self.register_buffer('team_ids', team_ids)
+
+        # Parameters
+        attention_heads = 4
+        # hidden_dim = 32
+        attention_dim = attend_dims[-1] // attention_heads
+
+        # ### Embeddings ###
+        # Ego embedding encoder
+        ego_encoder_layers = []
+        ego_encoder_layers.append(nn.Linear(num_ego_obs, embed_dims[0]))
+        ego_encoder_layers.append(nn.LayerNorm(embed_dims[0]))
+        ego_encoder_layers.append(nn.Tanh())
+        for l in range(len(embed_dims)-1):
+            ego_encoder_layers.append(nn.Linear(embed_dims[l], embed_dims[l + 1]))
+            ego_encoder_layers.append(activation)
+        self.ego_encoder = nn.Sequential(*ego_encoder_layers)
+
+        # Ado embedding encoder
+        ado_encoder_layers = []
+        ado_encoder_layers.append(nn.Linear(num_ado_obs, embed_dims[0]))
+        ado_encoder_layers.append(nn.LayerNorm(embed_dims[0]))
+        ado_encoder_layers.append(nn.Tanh())
+        for l in range(len(embed_dims)-1):
+            ado_encoder_layers.append(nn.Linear(embed_dims[l], embed_dims[l + 1]))
+            ado_encoder_layers.append(activation)
+        self.ado_encoder = nn.Sequential(*ado_encoder_layers)
+
+        # ### Attention block ###
+        self.att_block = Block(
+          ego_size=embed_dims[-1], 
+          ado_size=embed_dims[-1]+1,
+          n_embd=attention_dim,
+          n_head=attention_heads,
+          )
+
+
+  def forward(self, observations):
+
+      multi_ego = False
+      obs_shape = observations.shape
+      if len(observations.shape)==3:
+        multi_ego = True
+        observations = observations.view(-1, obs_shape[-1])
+
+      obs_ego = observations[..., :self.num_ego_obs]
+      obs_ado = observations[..., self.num_ego_obs:self.num_ego_obs+(self.num_agents-1)*self.num_ado_obs]
+
+      teamids = self.team_ids + 0 * observations[..., 0].unsqueeze(dim=-1)
+
+      x_ego = self.ego_encoder(obs_ego.unsqueeze(dim=1))
+      x_ado = []
+      for ado_id in range(self.num_agents-1):
+        x_ado.append(torch.cat((self.ado_encoder(obs_ado[..., ado_id::(self.num_agents-1)]), teamids[..., ado_id+1].unsqueeze(dim=-1)), dim=-1))
+      x_ado = torch.stack(x_ado, dim=1)
+      # x_ado = torch.stack([torch.cat((obs_ado[..., ado_id::(self.num_agents-1)], teamids[..., ado_id+1].unsqueeze(dim=-1)), dim=-1) for ado_id in range(self.num_agents-1)], dim=1)
+
+      z_ado = self.att_block(x_ego, x_ado)
+      z_ado = z_ado.squeeze(dim=1)
+
+      new_obs = torch.cat((obs_ego, z_ado), dim=1)
+      if multi_ego:
+        # new_obs = new_obs.view(*obs_shape[:2], -1)
+        new_obs = new_obs.view(obs_shape[0], obs_shape[1], -1)
+      return new_obs
+
+
 class EncoderIdentity(nn.Module):
 
   def __init__(self):
@@ -257,17 +411,18 @@ class EncoderIdentity(nn.Module):
       return observations
 
 
-def get_encoder(num_ego_obs, num_ado_obs, hidden_dims, teamsize, numteams, encoder_type, activation='leaky_relu'):
+def get_encoder(num_ego_obs, num_ado_obs, embed_dims, attend_dims, teamsize, numteams, encoder_type, activation=torch.nn.LeakyReLU()):
 
     encoder = None
 
     if encoder_type=='identity':
         encoder = EncoderIdentity()
     elif encoder_type=='attention4':
-        encoder = EncoderAttention4(
+        encoder = EncoderAttention4v2(
           num_ego_obs=num_ego_obs, 
           num_ado_obs=num_ado_obs, 
-          hidden_dims=hidden_dims, 
+          embed_dims=embed_dims, 
+          attend_dims=attend_dims,
           output_dim=num_ado_obs, 
           numteams=numteams, 
           teamsize=teamsize,

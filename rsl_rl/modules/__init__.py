@@ -36,3 +36,6 @@ from .hierarchical_actor_critic import HierarchicalActorCritic
 from .bilevel_actor_critic import BilevelActorCritic
 from .bilevel_actor_critic_attention import BilevelActorCriticAttention
 from .bima_actor_critic import MultiTeamBilevelActorCritic, TeamBilevelActorCritic
+
+from .bilevel_deccritic_attention import BilevelDecCriticAttention
+from .bima_deccritic import MultiTeamBilevelDecCritic, TeamBilevelDecCritic
