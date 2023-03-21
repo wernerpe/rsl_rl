@@ -90,7 +90,7 @@ class BilevelDecCriticAttention(nn.Module):
         encoder_type = kwargs['encoder_type']
         encoder_attend_dims = kwargs['encoder_attend_dims']
 
-        # teamsize = kwargs['teamsize']
+        teamsize = kwargs['teamsize']
         # numteams = kwargs['numteams']
 
         num_ego_obs = kwargs['num_ego_obs']
@@ -144,6 +144,7 @@ class BilevelDecCriticAttention(nn.Module):
           activation=activation,
           encoder=encoder,
           train_encoder=train_encoder,
+          teamsize = teamsize
         )
 
         print(f"Critic MLP: {self.critic}")
@@ -243,7 +244,7 @@ class BilevelDecCriticAttention(nn.Module):
 
 class CriticAttention(nn.Module):
   
-    def __init__(self, input_dim, hidden_dims, split_dim, activation, encoder, num_actions, num_bins, train_encoder=False, distributional=False):
+    def __init__(self, input_dim, hidden_dims, split_dim, activation, encoder, num_actions, num_bins, teamsize, train_encoder=False, distributional=False):
 
         super(CriticAttention, self).__init__()
 
@@ -253,6 +254,7 @@ class CriticAttention(nn.Module):
         self._train_encoder = train_encoder
         self._num_actions = num_actions
         self._num_bins = num_bins
+        self._teamsize = teamsize
 
         critic_layers = []
         critic_layers.append(nn.Linear(input_dim, hidden_dims[0]))
@@ -276,7 +278,7 @@ class CriticAttention(nn.Module):
             latent = latent.detach()
         obs = torch.concat((latent, obs2), dim=-1)
         q_values = self._network(obs)
-        return q_values.view((*q_values.shape[:-1], self._num_actions, self._num_bins))
+        return q_values.view((-1, self._teamsize, self._num_actions, self._num_bins))
 
 
 def get_activation(act_name):
