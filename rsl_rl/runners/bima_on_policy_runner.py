@@ -81,9 +81,10 @@ class BimaOnPolicyRunner:
         self.warmup_hl_ini = self.cfg["warmup_hl_ini"]
         self.warmup_hl_iter = min(self.warmup_hl_iter, self.pretrain_ll_iter)
 
-        act_min = self.env.action_min_hl
-        act_max = self.env.action_max_hl
-        act_ini = self.env.action_ini_hl
+        act_min = self.env.action_min_hl[:self.num_actions_hl]
+        act_max = self.env.action_max_hl[:self.num_actions_hl]
+        act_ini = self.env.action_ini_hl[:self.num_actions_hl]
+        act_all = self.env.action_all_hl[:self.num_actions_hl]
 
         teamsize = self.policy_cfg['teamsize']
         numteams = self.policy_cfg['numteams']
@@ -122,6 +123,7 @@ class BimaOnPolicyRunner:
                                                         act_min=act_min,
                                                         act_max=act_max,
                                                         act_ini=act_ini,
+                                                        act_all=act_all,
                                                         device=device,
                                                         discrete=True,
                                                         **self.policy_cfg).to(self.device)
@@ -136,9 +138,9 @@ class BimaOnPolicyRunner:
                                                         device=device,
                                                         **self.policy_cfg).to(self.device)
         alg_class_hl = eval(self.cfg["algorithm_class_hl_name"]) # BilevelPPO
-        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=True, device=self.device, schedule="fixed", clip_param=0.1, entropy_coef=0.001, gamma=0.90, **self.alg_cfg)
+        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=True, device=self.device, schedule="adaptive", clip_param=0.2, entropy_coef=0.001, gamma=0.90, **self.alg_cfg)
         alg_class_ll = eval(self.cfg["algorithm_class_ll_name"]) # BilevelPPO
-        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=False, device=self.device, schedule="adaptive", clip_param=0.2, entropy_coef=0.01, gamma=0.99, **self.alg_cfg)
+        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=False, device=self.device, schedule="adaptive", clip_param=0.2, entropy_coef=0.002, gamma=0.99, **self.alg_cfg)
 
         self.num_steps_per_env_hl = self.cfg["num_steps_per_env_hl"]
         self.num_steps_per_env_ll = self.cfg["num_steps_per_env_ll"]
@@ -268,6 +270,7 @@ class BimaOnPolicyRunner:
                 self.alg_hl.actor_critic.eval()
                 self.alg_ll.actor_critic.train()
                 self.env.set_train_level(low_level=True)
+                self.env.set_reset_agent_ids(reset_id_num=1)
 
                 start_ll = time.time()
 
@@ -324,7 +327,7 @@ class BimaOnPolicyRunner:
                             cur_mean_reward_sum_ll += torch.sum(torch.mean(rewards[:, self.alg_ll.actor_critic.teams[0], :], dim = 1), dim = 1)
                             # cur_mean_team_reward_sum_ll += torch.mean(rewards[:, self.alg_ll.teams[0], 1], dim = 1)
                             cur_episode_length_ll += 1
-                            new_ids_ll = (dones > 0).nonzero(as_tuple=False)
+                            new_ids_ll = torch.cumsum(dones > 0, axis=-1)[..., self.env.reset_ids].nonzero(as_tuple=False)
                             rewbuffer_ll.extend(cur_mean_reward_sum_ll[new_ids_ll][:, 0].cpu().numpy().tolist())
                             # trewbuffer_ll.extend(cur_mean_team_reward_sum_ll[new_ids_ll][:, 0].cpu().numpy().tolist())
                             lenbuffer_ll.extend(cur_episode_length_ll[new_ids_ll][:, 0].cpu().numpy().tolist())
@@ -385,6 +388,7 @@ class BimaOnPolicyRunner:
                 self.alg_hl.actor_critic.train()
                 self.alg_ll.actor_critic.eval()
                 self.env.set_train_level(high_level=True)
+                self.env.set_reset_agent_ids(reset_id_num=self.env.team_size)
 
                 start_hl = time.time()
                 
@@ -427,7 +431,7 @@ class BimaOnPolicyRunner:
                                 observation_infos.append(infos['observations'])
                             cur_mean_reward_sum_hl += torch.sum(torch.mean(reward_ep_ll[:, self.alg_ll.actor_critic.teams[0], :], dim = 1), dim = 1)
                             cur_episode_length_hl += self.dt_hl
-                            new_ids_hl = (dones > 0).nonzero(as_tuple=False)
+                            new_ids_hl = torch.cumsum(dones > 0, axis=-1)[..., self.env.reset_ids].nonzero(as_tuple=False)
                             rewbuffer_hl.extend(cur_mean_reward_sum_hl[new_ids_hl][:, 0].cpu().numpy().tolist())
                             lenbuffer_hl.extend(cur_episode_length_hl[new_ids_hl][:, 0].cpu().numpy().tolist())
                             cur_mean_reward_sum_hl[new_ids_hl] = 0
@@ -528,23 +532,25 @@ class BimaOnPolicyRunner:
         fps = int(steps_per_env * self.env.num_envs / (tot_time))
 
         if not log_ll:
-          mean_std_hl = self.alg_hl.actor_critic.std.mean()
+          mean_std_hl = self.alg_hl.actor_critic.action_std[:, 0].mean(dim=0)
           self.writer.add_scalar('Loss/value_function_hl', locs['mean_value_loss_hl'], locs['it'])
           self.writer.add_scalar('Loss/surrogate_hl', locs['mean_surrogate_loss_hl'], locs['it'])
           self.writer.add_scalar('Loss/entropy_hl', locs['mean_entropy_loss_hl'], locs['it'])
           self.writer.add_scalar('Loss/learning_rate_hl', self.alg_hl.learning_rate, locs['it'])
-          self.writer.add_scalar('Policy/mean_noise_std_hl', mean_std_hl.item(), locs['it'])
+          for idx, mean_std in enumerate(mean_std_hl):
+              self.writer.add_scalar('Policy/mean_noise_std_hl_' + str(idx), mean_std.item(), locs['it'])
           self.writer.add_scalar('Perf/collection time_hl', locs['collection_time_hl'], locs['it'])
           self.writer.add_scalar('Perf/learning_time_hl', locs['learn_time_hl'], locs['it'])
           for key, value in locs['mean_stats_hl'].items():
               self.writer.add_scalar('Loss/' + key + '_hl', value, locs['it'])
         else:
-          mean_std_ll = self.alg_ll.actor_critic.std.mean()
+          mean_std_ll = self.alg_ll.actor_critic.action_std[:, 0].mean(dim=0)
           self.writer.add_scalar('Loss/value_function_ll', locs['mean_value_loss_ll'], locs['it'])
           self.writer.add_scalar('Loss/surrogate_ll', locs['mean_surrogate_loss_ll'], locs['it'])
           self.writer.add_scalar('Loss/entropy_ll', locs['mean_entropy_loss_ll'], locs['it'])
           self.writer.add_scalar('Loss/learning_rate_ll', self.alg_ll.learning_rate, locs['it'])
-          self.writer.add_scalar('Policy/mean_noise_std_ll', mean_std_ll.item(), locs['it'])
+          for idx, mean_std in enumerate(mean_std_ll):
+              self.writer.add_scalar('Policy/mean_noise_std_ll_' + str(idx), mean_std.item(), locs['it'])
           self.writer.add_scalar('Perf/collection time_ll', locs['collection_time_ll'], locs['it'])
           self.writer.add_scalar('Perf/learning_time_ll', locs['learn_time_ll'], locs['it'])
           for key, value in locs['mean_stats_ll'].items():
@@ -561,56 +567,60 @@ class BimaOnPolicyRunner:
             self.writer.add_scalar('Train/mean_reward_ll/time', statistics.mean(locs['rewbuffer_ll']), self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length_ll/time', statistics.mean(locs['lenbuffer_ll']), self.tot_time)
 
-        str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
+        str_print = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
 
         if not log_ll:
           if len(locs['rewbuffer_hl']) > 0:
               log_string = (f"""{'#' * width}\n"""
-                            f"""{str.center(width, ' ')}\n\n"""
+                            f"""{str_print.center(width, ' ')}\n\n"""
                             f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                               'collection_time_hl']:.3f}s, learning {locs['learn_time_hl']:.3f}s)\n"""
                             f"""{'HL Value function loss:':>{pad}} {locs['mean_value_loss_hl']:.4f}\n"""
                             f"""{'HL Surrogate loss:':>{pad}} {locs['mean_surrogate_loss_hl']:.4f}\n"""
-                            f"""{'HL Entropy loss:':>{pad}} {locs['mean_entropy_loss_hl']:.4f}\n"""
-                            f"""{'HL Mean action noise std:':>{pad}} {mean_std_hl.item():.2f}\n"""
-                            f"""{'HL Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer_hl']):.2f}\n"""
+                            f"""{'HL Entropy loss:':>{pad}} {locs['mean_entropy_loss_hl']:.4f}\n""")
+              for idx, mean_std in enumerate(mean_std_hl):
+                log_string+=(f"""{'HL Mean action ' + str(idx) + ' noise std:':>{pad}} {mean_std.item():.2f}\n""")
+              log_string += (f"""{'HL Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer_hl']):.2f}\n"""
                             f"""{'HL Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer_hl']):.2f}\n""")
                           #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
                           #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
           else:
               log_string = (f"""{'#' * width}\n"""
-                            f"""{str.center(width, ' ')}\n\n"""
+                            f"""{str_print.center(width, ' ')}\n\n"""
                             f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                               'collection_time_hl']:.3f}s, learning {locs['learn_time_hl']:.3f}s)\n"""
                             f"""{'HL Value function loss:':>{pad}} {locs['mean_value_loss_hl']:.4f}\n"""
                             f"""{'HL Surrogate loss:':>{pad}} {locs['mean_surrogate_loss_hl']:.4f}\n"""
-                            f"""{'HL Entropy loss:':>{pad}} {locs['mean_entropy_loss_hl']:.4f}\n"""
-                            f"""{'HL Mean action noise std:':>{pad}} {mean_std_hl.item():.2f}\n""")
+                            f"""{'HL Entropy loss:':>{pad}} {locs['mean_entropy_loss_hl']:.4f}\n""")
+              for idx, mean_std in enumerate(mean_std_hl):
+                log_string+=(f"""{'HL Mean action ' + str(idx) + ' noise std:':>{pad}} {mean_std.item():.2f}\n""")
                           #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
                           #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
         else:
           if len(locs['rewbuffer_ll']) > 0:
               log_string = (f"""{'#' * width}\n"""
-                            f"""{str.center(width, ' ')}\n\n"""
+                            f"""{str_print.center(width, ' ')}\n\n"""
                             f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                               'collection_time_ll']:.3f}s, learning {locs['learn_time_ll']:.3f}s)\n"""
                             f"""{'LL Value function loss:':>{pad}} {locs['mean_value_loss_ll']:.4f}\n"""
                             f"""{'LL Surrogate loss:':>{pad}} {locs['mean_surrogate_loss_ll']:.4f}\n"""
-                            f"""{'LL Entropy loss:':>{pad}} {locs['mean_entropy_loss_ll']:.4f}\n"""
-                            f"""{'LL Mean action noise std:':>{pad}} {mean_std_ll.item():.2f}\n"""
-                            f"""{'LL Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer_ll']):.2f}\n"""
+                            f"""{'LL Entropy loss:':>{pad}} {locs['mean_entropy_loss_ll']:.4f}\n""")
+              for idx, mean_std in enumerate(mean_std_ll):
+                log_string+=(f"""{'LL Mean action ' + str(idx) + ' noise std:':>{pad}} {mean_std.item():.2f}\n""")
+              log_string += (f"""{'LL Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer_ll']):.2f}\n"""
                             f"""{'LL Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer_ll']):.2f}\n""")
                           #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
                           #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
           else:
               log_string = (f"""{'#' * width}\n"""
-                            f"""{str.center(width, ' ')}\n\n"""
+                            f"""{str_print.center(width, ' ')}\n\n"""
                             f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                               'collection_time_ll']:.3f}s, learning {locs['learn_time_ll']:.3f}s)\n"""
                             f"""{'LL Value function loss:':>{pad}} {locs['mean_value_loss_ll']:.4f}\n"""
                             f"""{'LL Surrogate loss:':>{pad}} {locs['mean_surrogate_loss_ll']:.4f}\n"""
-                            f"""{'LL Entropy loss:':>{pad}} {locs['mean_entropy_loss_ll']:.4f}\n"""
-                            f"""{'LL Mean action noise std:':>{pad}} {mean_std_ll.item():.2f}\n""")
+                            f"""{'LL Entropy loss:':>{pad}} {locs['mean_entropy_loss_ll']:.4f}\n""")
+              for idx, mean_std in enumerate(mean_std_ll):
+                log_string+=(f"""{'LL Mean action ' + str(idx) + ' noise std:':>{pad}} {mean_std.item():.2f}\n""")
                           #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
                           #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
 

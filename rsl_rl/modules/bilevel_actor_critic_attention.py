@@ -73,6 +73,7 @@ class BilevelActorCriticAttention(nn.Module):
                         act_min=None,
                         act_max=None,
                         act_ini=None,
+                        act_all=None,
                         discrete=False,
                         actor_hidden_dims=[256, 256, 256],
                         critic_hidden_dims=[256, 256, 256],
@@ -125,21 +126,28 @@ class BilevelActorCriticAttention(nn.Module):
 
         self.std_per_obs = kwargs['std_per_obs']
         self.std_ini = init_noise_std
-        self.std_min = 3.e-2  # 1.e-2
+        self.std_min = 1.e-2  # 3.e-2  # 1.e-2
 
         # # Encoder
         # self.encoder = encoder
 
         self.use_discrete_policy = discrete
-        self.use_output_mapping = (act_min and act_max and act_ini) is not None
+        self.use_output_mapping = (act_min and act_max and act_ini and act_all) is not None
         if self.use_discrete_policy:
             assert self.use_output_mapping
 
-            # Discrete actor
-            self.num_bins = 5  # 5
-            self._trafo_scale = torch.tensor(np.linspace(start=act_min, stop=act_max, num=self.num_bins, axis=-1), dtype=torch.float, device=device)
-            self._trafo_delta = self._trafo_scale[:, 1] - self._trafo_scale[:, 0]
+            ### Discrete actor
+            # # OLD
+            # self.num_bins = 5  # 5
+            # self._trafo_scale = torch.tensor(np.linspace(start=act_min, stop=act_max, num=self.num_bins, axis=-1), dtype=torch.float, device=device)
+            # self._trafo_delta = self._trafo_scale[:, 1] - self._trafo_scale[:, 0]
+            # self._trafo_loc = 0.0 * torch.tensor(act_min, dtype=torch.float, device=device)
+
+            # NEW
+            self.num_bins = len(act_all[0])
+            self._trafo_scale = torch.tensor(act_all, dtype=torch.float, device=device)
             self._trafo_loc = 0.0 * torch.tensor(act_min, dtype=torch.float, device=device)
+
             self.mlp_output_dim_a = num_actions * self.num_bins
         else:
             if self.use_output_mapping:
@@ -150,10 +158,11 @@ class BilevelActorCriticAttention(nn.Module):
                 self._mean_target_std_min = nn.Parameter(torch.tensor(act_min[2:]), requires_grad=False)
                 self._mean_target_std_max = nn.Parameter(torch.tensor(act_max[2:]), requires_grad=False)
                 self._mean_target_std_ini = nn.Parameter(torch.tensor(act_ini[2:]), requires_grad=False)
-                self._softplus = nn.Softplus()
 
             if self.std_per_obs:
                 self.mlp_output_dim_a *= 2
+
+        self._softplus = nn.Softplus()
         
         # Policy
         self.actor = ActorAttention(
@@ -180,7 +189,8 @@ class BilevelActorCriticAttention(nn.Module):
         print(f"Critic MLP: {self.critics[0]}")
 
         # Action noise
-        self.std = nn.Parameter((init_noise_std-self.std_min) * torch.ones(num_actions) + self.std_min)
+        # self.std = nn.Parameter((init_noise_std-self.std_min) * torch.ones(num_actions)  + self.std_min)
+        self.std = nn.Parameter(torch.zeros(num_actions))
         self.distribution = None
         # disable args validation for speedup
         Normal.set_default_validate_args = False
@@ -276,7 +286,8 @@ class BilevelActorCriticAttention(nn.Module):
                 # std = torch.exp(logstd)  # +0.5)
             else:
                 mean_raw = self.actor(observations)
-                std = mean_raw*0. + self.std
+                # std = mean_raw*0. + self.std
+                std = mean_raw*0. + (self.std_ini-self.std_min) * self._softplus(self.std)/self._softplus(0.0*self.std) + self.std_min
             mean = self.transform_mean_prediction(mean_raw)
 
             self.distribution = Normal(mean, std)
@@ -287,7 +298,8 @@ class BilevelActorCriticAttention(nn.Module):
         return (self._trafo_scale * onehot).sum(dim=-1) + self._trafo_loc
 
     def convert_action_to_onehot(self, action):
-        return nn.functional.one_hot(((action - self._trafo_scale[:, 0]) / self._trafo_delta).long(), num_classes=self.num_bins)
+        # return nn.functional.one_hot(((action - self._trafo_scale[:, 0]) / self._trafo_delta).long(), num_classes=self.num_bins)
+        return 1.0 * (action.unsqueeze(-1)==self._trafo_scale.unsqueeze(0).unsqueeze(0))
 
     def act(self, observations, **kwargs):
 

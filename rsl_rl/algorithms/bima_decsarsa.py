@@ -105,8 +105,8 @@ class BimaDecSARSA:
         self.num_update_steps = 0
         self.target_update_interval = 20  # 50
 
-        self.use_sdqn = True
-        self.use_mdqn = True
+        self.use_sdqn = False  # True  # True
+        self.use_mdqn = False  # True
         self.entropy_temperature = 0.03
         self.munchausen_coefficient = 0.9
         self.clip_value_min = -1e3
@@ -144,7 +144,7 @@ class BimaDecSARSA:
         self.transition.observations = obs[:, self.actor_critic.teams[0], :]
         self.transition.actions = all_agent_actions[:, self.actor_critic.teams[0], :]
 
-        self.transition.target_curr_values = self.target_actor_critic.evaluate(obs)[:, self.actor_critic.teams[0], :]
+        self.transition.target_curr_values = self.target_actor_critic.evaluate(obs[:, self.actor_critic.teams[0], :])
 
         return all_agent_actions
 
@@ -168,8 +168,8 @@ class BimaDecSARSA:
                 bootstrap_target_value = self.compute_value_epsgreedy(self.transition.target_curr_values)
             self.transition.rewards += self.gamma * bootstrap_target_value * infos['time_outs'].unsqueeze(1).unsqueeze(1).to(self.device)
 
-        is_not_done = (1.0 - 1.0 * self.transition.dones.unsqueeze(dim=1).unsqueeze(dim=1))
-        self.transition.target_next_values = is_not_done * self.target_actor_critic.evaluate(next_observations)[:, self.actor_critic.teams[0], :]
+        is_not_done = (1.0 - 1.0 * self.transition.dones.unsqueeze(dim=-1).unsqueeze(dim=-1))
+        self.transition.target_next_values = is_not_done * self.target_actor_critic.evaluate(next_observations[:, self.actor_critic.teams[0], :])
 
         # Record the transition
         self.storage.add_transitions(self.transition)
@@ -206,14 +206,14 @@ class BimaDecSARSA:
 
             target = (rew_batch + self.gamma * target_val_batch).detach()
 
-            val_all_batch = self.actor_critic.evaluate(obs_batch)[:, self.actor_critic.teams[0], :]
+            val_all_batch = self.actor_critic.evaluate(obs_batch[:, self.actor_critic.teams[0], :])
             val_act_batch = torch.gather(val_all_batch, -1, act_idx_batch.unsqueeze(dim=-1)).mean(dim=-2)
 
             td_error = target - val_act_batch
 
             value_loss = self.loss_fc(td_error.squeeze(), (0*obs_batch[..., 0]).squeeze())
 
-            value_loss = value_loss.mean()
+            # value_loss = value_loss.mean()
             target_mean = target.mean()
             values_mean = val_act_batch.mean()
 

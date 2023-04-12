@@ -73,6 +73,7 @@ class BilevelDecCriticAttention(nn.Module):
                         act_min=None,
                         act_max=None,
                         act_ini=None,
+                        act_all=None,
                         discrete=False,
                         actor_hidden_dims=[256, 256, 256],
                         critic_hidden_dims=[256, 256, 256],
@@ -127,11 +128,18 @@ class BilevelDecCriticAttention(nn.Module):
         self.std_ini = init_noise_std
         self.std_min = 3.e-2  # 1.e-2
 
-        # Discrete actor
-        self.num_bins = 5  # 5
-        self._trafo_scale = torch.tensor(np.linspace(start=act_min, stop=act_max, num=self.num_bins, axis=-1), dtype=torch.float, device=device)
-        self._trafo_delta = self._trafo_scale[:, 1] - self._trafo_scale[:, 0]
+        ### Discrete actor
+        # # OLD
+        # self.num_bins = 5  # 5
+        # self._trafo_scale = torch.tensor(np.linspace(start=act_min, stop=act_max, num=self.num_bins, axis=-1), dtype=torch.float, device=device)
+        # self._trafo_delta = self._trafo_scale[:, 1] - self._trafo_scale[:, 0]
+        # self._trafo_loc = 0.0 * torch.tensor(act_min, dtype=torch.float, device=device)
+
+        # NEW
+        self.num_bins = len(act_all[0])
+        self._trafo_scale = torch.tensor(act_all, dtype=torch.float, device=device)
         self._trafo_loc = 0.0 * torch.tensor(act_min, dtype=torch.float, device=device)
+
         self.mlp_output_dim_a = num_actions * self.num_bins
        
         # Value function
@@ -150,7 +158,7 @@ class BilevelDecCriticAttention(nn.Module):
         print(f"Critic MLP: {self.critic}")
 
         # Action noise
-        self.epsilon = 0.1
+        self.epsilon = 0.2  # 0.1
         self.distribution = None
         # disable args validation for speedup
         Normal.set_default_validate_args = False
@@ -193,7 +201,8 @@ class BilevelDecCriticAttention(nn.Module):
         return (self._trafo_scale * onehot).sum(dim=-1) + self._trafo_loc
 
     def convert_action_to_onehot(self, action):
-        return nn.functional.one_hot(((action - self._trafo_scale[:, 0]) / self._trafo_delta).long(), num_classes=self.num_bins)
+        # return nn.functional.one_hot(((action - self._trafo_scale[:, 0]) / self._trafo_delta).long(), num_classes=self.num_bins)
+        return 1.0 * (action.unsqueeze(-1)==self._trafo_scale.unsqueeze(0).unsqueeze(0))
 
     def act(self, observations, **kwargs):
         return self.act_with_epsilon(observations, epsilon=self.epsilon)
@@ -224,18 +233,16 @@ class BilevelDecCriticAttention(nn.Module):
     def update_distribution_with_epsilon(self, observations, epsilon):
         q_values = self.evaluate(observations)
 
-        # epsilon-greedy
+        ### epsilon-greedy
         max_value = torch.max(q_values, dim=-1, keepdim=True)[0]
         greedy_probs = 1.0*(max_value == q_values) #torch.equal(q_values, max_value)
         greedy_probs /= torch.sum(greedy_probs, dim=-1, keepdim=True)  # why?
 
         # num_dim = q_values.shape[-1]
-
         # dither_probs = 1.0 / (num_dim) * torch.ones_like(q_values)
-
         # probs = epsilon * dither_probs + (1 - epsilon) * greedy_probs
 
-        # softmax
+        ### softmax
         act_greedy = 1.0 * (epsilon == 0.0)
         probs = (1.0-act_greedy) * torch.softmax(q_values, dim=-1) + act_greedy * greedy_probs
 

@@ -74,7 +74,7 @@ class BimaRolloutStorage:
             self.privileged_observations = None
         self.rewards = torch.zeros(num_transitions_per_env, num_envs, num_critics, num_agents, 1, device=self.device)
         self.actions = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, device=self.device)
-        self.dones = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device).byte()
+        self.dones = torch.zeros(num_transitions_per_env, num_envs, num_agents, device=self.device).byte()
 
         # For PPO
         self.actions_log_prob = torch.zeros(num_transitions_per_env, num_envs, num_agents, 1, device=self.device)
@@ -103,7 +103,7 @@ class BimaRolloutStorage:
         if self.privileged_observations is not None: self.privileged_observations[self.step].copy_(transition.critic_observations)
         self.actions[self.step].copy_(transition.actions)
         self.rewards[self.step].copy_(transition.rewards)
-        self.dones[self.step].copy_(transition.dones.view(-1, 1))
+        self.dones[self.step].copy_(transition.dones)  # .view(-1, 1))
         self.values[self.step].copy_(transition.values)
         self.actions_log_prob[self.step].copy_(transition.actions_log_prob.view(-1, self.num_agents, 1))
         self.mu[self.step].copy_(transition.action_mean)
@@ -149,8 +149,8 @@ class BimaRolloutStorage:
             else:
                 next_values = self.values[step + 1]
             next_is_not_terminal = 1.0 - self.dones[step].float()
-            delta = self.rewards[step] + next_is_not_terminal.unsqueeze(1).unsqueeze(1) * gamma * next_values - self.values[step]
-            advantage = delta + next_is_not_terminal.unsqueeze(1).unsqueeze(1) * gamma * lam * advantage
+            delta = self.rewards[step] + next_is_not_terminal.unsqueeze(1).unsqueeze(-1) * gamma * next_values - self.values[step]
+            advantage = delta + next_is_not_terminal.unsqueeze(1).unsqueeze(-1) * gamma * lam * advantage
             self.returns[step] = advantage + self.values[step]
 
         # Compute and normalize the advantages
@@ -342,7 +342,7 @@ class BimaSARSAStorage:
         self.rewards = torch.zeros(num_transitions_per_env, num_envs, num_agents, 1, device=self.device)
         self.actions = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, device=self.device)
         self.next_observations = torch.zeros(num_transitions_per_env, num_envs, num_agents, *obs_shape, device=self.device)
-        self.dones = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device).byte()
+        self.dones = torch.zeros(num_transitions_per_env, num_envs, num_agents, device=self.device).byte()
         self.target_curr_values = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, num_bins, device=self.device)
         self.target_next_values = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, num_bins, device=self.device)
 
@@ -361,7 +361,7 @@ class BimaSARSAStorage:
         self.actions[self.step].copy_(transition.actions)
         self.rewards[self.step].copy_(transition.rewards)
         self.next_observations[self.step].copy_(transition.next_observations)
-        self.dones[self.step].copy_(transition.dones.view(-1, 1))
+        self.dones[self.step].copy_(transition.dones)  # .view(-1, 1))
         self.target_curr_values[self.step].copy_(transition.target_curr_values)
         self.target_next_values[self.step].copy_(transition.target_next_values)
         self.step += 1
