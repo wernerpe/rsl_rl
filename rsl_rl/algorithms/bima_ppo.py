@@ -35,6 +35,8 @@ import torch.optim as optim
 from rsl_rl.modules import MultiTeamBilevelActorCritic
 from rsl_rl.storage import BimaRolloutStorage
 
+import time
+
 class BimaPPO:
     actor_critic: MultiTeamBilevelActorCritic
     def __init__(self,
@@ -116,7 +118,11 @@ class BimaPPO:
         all_agent_actions =  self.actor_critic.act(obs).detach()
         self.transition.actions = all_agent_actions[:, self.actor_critic.teams[0], :]
         self.transition.values = self.actor_critic.evaluate(critic_obs[:, self.actor_critic.teams[0], :]).detach()
-        self.values_separate = torch.concat([self.actor_critic.evaluate(critic_obs[:, agent_id, :].unsqueeze(1)).detach() for agent_id in self.actor_critic.teams[0]], dim=-2)
+
+        ### Commented this as not used and costly w/r/t time
+        # t0 = time.time()
+        # # self.values_separate = torch.concat([self.actor_critic.evaluate(critic_obs[:, agent_id, :].unsqueeze(1)).detach() for agent_id in self.actor_critic.teams[0]], dim=-2)
+        # print("dt = " +str(time.time() - t0))
 
         #only record log prob of actions from net to train
         lp, m, s, e = self.actor_critic.update_distribution_and_get_actions_log_prob_mu_sigma_entropy(obs[:, self.actor_critic.teams[0], :], self.transition.actions)

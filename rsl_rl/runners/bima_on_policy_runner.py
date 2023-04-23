@@ -276,6 +276,7 @@ class BimaOnPolicyRunner:
 
                 goal_pos_scale = self.warmup_hl_ini + it / (1.0 + self.warmup_hl_iter) * (1.0 - self.warmup_hl_ini)
                 goal_pos_scale = min(goal_pos_scale, 1.0)
+
                 
                 # Rollout
                 with torch.inference_mode():
@@ -283,6 +284,7 @@ class BimaOnPolicyRunner:
                         # Sample new HL target at every step and decide whether to update internally
                         actions_hl_raw = self.alg_hl.act(obs, critic_obs)
                         actions_hl_raw[..., :2] *= goal_pos_scale  # allow for warmup
+
 
                         # if it < self.warmup_hl_iter:
                         #     actions_hl_raw[..., 2:4] = 0.3 + 0.0*actions_hl_raw[..., 2:4]
@@ -296,7 +298,7 @@ class BimaOnPolicyRunner:
 
                         self.env.set_hl_action_probs(self.alg_hl.actor_critic.action_probs)
                         actions_hl = self.env.project_into_track_frame(actions_hl_raw)
-
+                        
                         obs_ll = torch.concat((obs, actions_hl), dim=-1)
                         critic_obs_ll = torch.concat((critic_obs, actions_hl), dim=-1)
                         # obs_ll = obs
@@ -308,6 +310,7 @@ class BimaOnPolicyRunner:
                         # self.env.viewer.update_attention(self.alg_ll.actor_critic.teamacs[0].ac.actor._encoder.attention_weights)
 
                         obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
+                                                
                         critic_obs = privileged_obs if privileged_obs is not None else obs
                         obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
                         if rewards.shape[-1]==2:
@@ -335,6 +338,7 @@ class BimaOnPolicyRunner:
                             # cur_mean_team_reward_sum_ll[new_ids_ll] = 0
                             cur_episode_length_ll[new_ids_ll] = 0
 
+
                         self.alg_ll.actor_critic.update_ac_ratings(infos)  # NOTE: self-play
 
                     stop_ll = time.time()
@@ -343,10 +347,12 @@ class BimaOnPolicyRunner:
                     # Learning step
                     start_ll = stop_ll
                     self.alg_ll.compute_returns(critic_obs_ll)
-                
+                                
                 mean_value_loss_ll, mean_surrogate_loss_ll, mean_entropy_loss_ll, mean_stats_ll = self.alg_ll.update()
+                                
                 if  it % self.population_update_interval == 0:  # NOTE: self-play
                     self.alg_ll.update_population()
+                                
                 stop_ll = time.time()
                 learn_time_ll = stop_ll - start_ll
 

@@ -126,7 +126,7 @@ class BilevelActorCriticAttention(nn.Module):
 
         self.std_per_obs = kwargs['std_per_obs']
         self.std_ini = init_noise_std
-        self.std_min = 1.e-2  # 3.e-2  # 1.e-2
+        self.std_min = 5.e-2  # 3.e-2  # 1.e-2
 
         # # Encoder
         # self.encoder = encoder
