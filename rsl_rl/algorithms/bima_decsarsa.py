@@ -56,7 +56,10 @@ class BimaDecSARSA:
                  use_clipped_value_loss=True,
                  schedule="fixed",
                  desired_kl=0.01,
+                 use_sdqn=False,
+                 use_mdqn=False,
                  device='cpu',
+                 **kwargs,
                  ):
 
         self.device = device
@@ -105,8 +108,8 @@ class BimaDecSARSA:
         self.num_update_steps = 0
         self.target_update_interval = 20  # 50
 
-        self.use_sdqn = False  # True  # True
-        self.use_mdqn = False  # True
+        self.use_sdqn = use_sdqn  # True  # True
+        self.use_mdqn = use_mdqn  # True
         self.entropy_temperature = 0.03
         self.munchausen_coefficient = 0.9
         self.clip_value_min = -1e3
@@ -249,7 +252,7 @@ class BimaDecSARSA:
                                             'mean_values': mean_values,
                                             }
 
-    def update_population(self,):
+    def update_population(self, update_pop):
         # self.actor_critic.redraw_ac_networks()
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
@@ -260,7 +263,7 @@ class BimaDecSARSA:
         batch = next(generator)
         obs_batch = batch[0]
 
-        self.actor_critic.redraw_ac_networks_KL_divergence(obs_batch)  # FIXME: uncomment & fix
+        self.actor_critic.redraw_ac_networks_KL_divergence(obs_batch, update_pop)  # FIXME: uncomment & fix
 
     def update_ratings(self, eval_ranks, eval_ep_duration, max_ep_len):
         eval_team_ranks = -100. * torch.ones_like(eval_ranks[..., :len(self.actor_critic.teams)])

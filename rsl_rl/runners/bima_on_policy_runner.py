@@ -75,6 +75,7 @@ class BimaOnPolicyRunner:
 
         self.iter_per_hl = self.cfg["iter_per_hl"]
         self.iter_per_ll = self.cfg["iter_per_ll"]
+        self.start_on_ll = self.cfg["start_on_ll"]
 
         self.pretrain_ll_iter = self.cfg["pretrain_ll_iter"]
         self.warmup_hl_iter = self.cfg["warmup_hl_iter"]
@@ -99,6 +100,7 @@ class BimaOnPolicyRunner:
             self.policy_cfg['encoder_attend_dims'] = [self.env.num_obs]
         encoder_embed_dims = self.policy_cfg['encoder_embed_dims']
         encoder_attend_dims = self.policy_cfg['encoder_attend_dims']
+        do_train_encoder = self.policy_cfg['do_train_encoder']
 
         encoders = [get_encoder(
             num_ego_obs=self.policy_cfg['num_ego_obs'], 
@@ -111,7 +113,7 @@ class BimaOnPolicyRunner:
         )]
         for _ in range(numteams-1):
             encoders.append(copy.deepcopy(encoders[0]))
-
+        
         actor_critic_class_hl = eval(self.cfg["policy_class_hl_name"]) # BilevelActorCritic
         actor_critic_hl: MultiTeamBilevelActorCritic = actor_critic_class_hl(
                                                         num_actor_obs=self.env.num_obs,
@@ -119,7 +121,7 @@ class BimaOnPolicyRunner:
                                                         num_add_obs=0,
                                                         num_actions=self.num_actions_hl,
                                                         encoders=encoders,
-                                                        train_encoder=False,
+                                                        train_encoder=(False & do_train_encoder),
                                                         act_min=act_min,
                                                         act_max=act_max,
                                                         act_ini=act_ini,
@@ -134,7 +136,7 @@ class BimaOnPolicyRunner:
                                                         num_add_obs=self.num_obs_add_ll,
                                                         num_actions=self.env.num_actions,
                                                         encoders=encoders,
-                                                        train_encoder=True,
+                                                        train_encoder=(True & do_train_encoder),
                                                         device=device,
                                                         **self.policy_cfg).to(self.device)
         alg_class_hl = eval(self.cfg["algorithm_class_hl_name"]) # BilevelPPO
@@ -150,6 +152,7 @@ class BimaOnPolicyRunner:
         self.save_interval = self.cfg["save_interval"]
 
         self.population_update_interval = self.cfg["population_update_interval"]
+        self.population_sample_interval = self.cfg["population_sample_interval"]
 
         # init storage and model
         self.alg_hl.init_storage(self.env.num_envs, self.num_steps_per_env_hl, [self.env.num_obs], [self.env.num_privileged_obs], [self.num_actions_hl], teamsize)
@@ -169,6 +172,7 @@ class BimaOnPolicyRunner:
         self.tot_timesteps = 0
         self.tot_time = 0
         self.current_learning_iteration = 0
+        self.initial_learning_iteration = 0
 
         _, _ = self.env.reset()
 
@@ -197,10 +201,15 @@ class BimaOnPolicyRunner:
 
         iter_per_ll = self.iter_per_ll  # 200
         iter_per_hl = self.iter_per_hl  # 20
-        iter_switch = [0]
-        while iter_switch[-1] < num_learning_iterations:
-            iter_switch.append(iter_switch[-1] + iter_per_ll)
-            iter_switch.append(iter_switch[-1] + iter_per_hl)
+        iter_switch = [self.initial_learning_iteration]  # 0
+        while iter_switch[-1] < num_learning_iterations + self.initial_learning_iteration:
+            if self.start_on_ll:
+                iter_switch.append(iter_switch[-1] + iter_per_ll)
+                iter_switch.append(iter_switch[-1] + iter_per_hl)
+            else:
+                iter_switch.append(iter_switch[-1] + iter_per_hl)
+                iter_switch.append(iter_switch[-1] + iter_per_ll)
+        iter_switch = iter_switch[1:]
 
         # initialize writer
         if self.log_dir is not None and self.writer is None:
@@ -247,11 +256,11 @@ class BimaOnPolicyRunner:
 
 
         # Start with low-level training
-        train_hl = False
-        train_ll = True
+        train_hl = False if self.start_on_ll else True
+        train_ll = True if self.start_on_ll else False
 
-        tot_iter = self.current_learning_iteration + num_learning_iterations
-        for it in range(self.current_learning_iteration, tot_iter):
+        tot_iter = self.initial_learning_iteration + num_learning_iterations
+        for it in range(self.initial_learning_iteration, tot_iter):
 
             self.env.set_dropout_prob(it)
             self.env.set_video_log_ep(it)
@@ -307,6 +316,7 @@ class BimaOnPolicyRunner:
                         self.env.set_ll_action_stats(self.alg_ll.actor_critic.action_mean, self.alg_ll.actor_critic.action_std)
                         self.env.set_ll_values_preds(self.alg_ll.transition.values.squeeze(dim=1))
 
+                        # attention_weights = self.alg_ll.actor_critic.teamacs[0].ac.actor._encoder(obs_ll, return_weights=True)
                         # self.env.viewer.update_attention(self.alg_ll.actor_critic.teamacs[0].ac.actor._encoder.attention_weights)
 
                         obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
@@ -350,8 +360,10 @@ class BimaOnPolicyRunner:
                                 
                 mean_value_loss_ll, mean_surrogate_loss_ll, mean_entropy_loss_ll, mean_stats_ll = self.alg_ll.update()
                                 
-                if  it % self.population_update_interval == 0:  # NOTE: self-play
-                    self.alg_ll.update_population()
+                if (it % self.population_sample_interval == 0) and (it != self.initial_learning_iteration):  # NOTE: self-play
+                    update_pop = (it % self.population_update_interval == 0)
+                    self.alg_hl.update_population(update_pop)
+                    self.alg_ll.update_population(update_pop)
                                 
                 stop_ll = time.time()
                 learn_time_ll = stop_ll - start_ll
@@ -453,8 +465,10 @@ class BimaOnPolicyRunner:
                     self.alg_hl.compute_returns(critic_obs)
                 
                 mean_value_loss_hl, mean_surrogate_loss_hl, mean_entropy_loss_hl, mean_stats_hl = self.alg_hl.update()
-                if  it % self.population_update_interval == 0:  # NOTE: self-play
-                    self.alg_hl.update_population()
+                if  (it % self.population_sample_interval == 0) and (it != self.initial_learning_iteration):  # NOTE: self-play
+                    update_pop = (it % self.population_update_interval == 0)
+                    self.alg_hl.update_population(update_pop)
+                    self.alg_ll.update_population(update_pop)
                 stop_hl = time.time()
                 learn_time_hl = stop_hl - start_hl
                 if self.log_dir is not None:
@@ -661,6 +675,7 @@ class BimaOnPolicyRunner:
         if load_optimizer:
             self.alg_hl.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
         self.current_learning_iteration = loaded_dict['iter']
+        self.initial_learning_iteration = self.current_learning_iteration
         return loaded_dict['infos']
 
     def load_ll(self, path, load_optimizer=True):
@@ -669,6 +684,7 @@ class BimaOnPolicyRunner:
         if load_optimizer:
             self.alg_ll.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
         self.current_learning_iteration = loaded_dict['iter']
+        self.initial_learning_iteration = self.current_learning_iteration
         return loaded_dict['infos']
     
     def load(self, path_ll, path_hl, load_optimizer = True):
@@ -696,6 +712,7 @@ class BimaOnPolicyRunner:
             self.alg_hl.optimizer.load_state_dict(opt_dicts_hl[0])
             self.alg_ll.optimizer.load_state_dict(opt_dicts_ll[0])
         self.current_learning_iteration = dicts_hl[0]['iter']
+        self.initial_learning_iteration = self.current_learning_iteration
 
         # #add loaded models to buffers and set current ratings
         # infos = []
@@ -724,6 +741,8 @@ class BimaOnPolicyRunner:
             #self.alg.actor_critic.past_ratings_mu.append(mu)
             #self.alg.actor_critic.past_ratings_sigma.append(sigma)
             self.alg_hl.actor_critic.past_models.append(dict_hl['model_state_dict'])
+            self.alg_hl.actor_critic.past_ratings_mu.append(self.alg_hl.actor_critic.past_ratings_mu[0])
+            self.alg_hl.actor_critic.past_ratings_sigma.append(self.alg_hl.actor_critic.past_ratings_sigma[0])
             # LL
             dict_ll = torch.load(path_ll)
             info_ll = dict_hl['infos']
@@ -732,6 +751,8 @@ class BimaOnPolicyRunner:
             #self.alg.actor_critic.past_ratings_mu.append(mu)
             #self.alg.actor_critic.past_ratings_sigma.append(sigma)
             self.alg_ll.actor_critic.past_models.append(dict_ll['model_state_dict'])
+            self.alg_ll.actor_critic.past_ratings_mu.append(self.alg_ll.actor_critic.past_ratings_mu[0])
+            self.alg_ll.actor_critic.past_ratings_sigma.append(self.alg_ll.actor_critic.past_ratings_sigma[0])
         
     def get_inference_policy_hl(self, device=None):
         self.alg_hl.actor_critic.eval() # switch to evaluation mode (dropout for example)

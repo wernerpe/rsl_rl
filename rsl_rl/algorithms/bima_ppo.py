@@ -55,6 +55,7 @@ class BimaPPO:
                  schedule="fixed",
                  desired_kl=0.01,
                  device='cpu',
+                 **kwargs,
                  ):
 
         self.device = device
@@ -343,7 +344,7 @@ class BimaPPO:
                                                                           'mean_kl': mean_kl,
                                                                           }
 
-    def update_population(self,):
+    def update_population(self, update_pop):
         # self.actor_critic.redraw_ac_networks()
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
@@ -354,7 +355,7 @@ class BimaPPO:
         batch = next(generator)
         obs_batch = batch[0]
 
-        self.actor_critic.redraw_ac_networks_KL_divergence(obs_batch)  # FIXME: uncomment & fix
+        self.actor_critic.redraw_ac_networks_KL_divergence(obs_batch, update_pop)  # FIXME: uncomment & fix
 
     def update_ratings(self, eval_ranks, eval_ep_duration, max_ep_len):
         eval_team_ranks = -100. * torch.ones_like(eval_ranks[..., :len(self.actor_critic.teams)])

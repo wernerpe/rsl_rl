@@ -128,7 +128,8 @@ class EncoderAttention3(nn.Module):
 
 class EncoderAttention4(nn.Module):
 
-  def __init__(self, num_ego_obs, num_ado_obs , hidden_dims, output_dim, numteams, teamsize, activation):
+  def __init__(self, num_ego_obs, num_ado_obs, embed_dims, attend_dims, output_dim, numteams, teamsize, activation):
+  # def __init__(self, num_ego_obs, num_ado_obs , hidden_dims, output_dim, numteams, teamsize, activation):
 
         super(EncoderAttention4, self).__init__()
 
@@ -144,30 +145,30 @@ class EncoderAttention4(nn.Module):
         # Parameters
         attention_heads = 4
         # hidden_dim = 32
-        self.attend_dim = hidden_dims[-1] // attention_heads
+        self.attend_dim = attend_dims[-1] // attention_heads
 
         # self.attention_weights = torch.zeros((attention_heads, self.num_agents-1)).to(device)
 
         # EGO encoder
         ego_encoder_layers = []
-        ego_encoder_layers.append(nn.Linear(num_ego_obs, hidden_dims[0]))
-        # ego_encoder_layers.append(nn.LayerNorm(hidden_dims[0]))
+        ego_encoder_layers.append(nn.Linear(num_ego_obs, embed_dims[0]))
+        # ego_encoder_layers.append(nn.LayerNorm(embed_dims[0]))
         # ego_encoder_layers.append(nn.Tanh())
         ego_encoder_layers.append(nn.LeakyReLU())
-        for l in range(len(hidden_dims)-1):
-            ego_encoder_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
+        for l in range(len(embed_dims)-1):
+            ego_encoder_layers.append(nn.Linear(embed_dims[l], embed_dims[l + 1]))
             ego_encoder_layers.append(activation)
         # encoder_layers.append(nn.Sigmoid())
         self.ego_encoder = nn.Sequential(*ego_encoder_layers)
 
         # ADO encoder
         ado_encoder_layers = []
-        ado_encoder_layers.append(nn.Linear(num_ado_obs + 1, hidden_dims[0]))
-        # ado_encoder_layers.append(nn.LayerNorm(hidden_dims[0]))
+        ado_encoder_layers.append(nn.Linear(num_ado_obs + 1, embed_dims[0]))
+        # ado_encoder_layers.append(nn.LayerNorm(embed_dims[0]))
         # ado_encoder_layers.append(nn.Tanh())
         ado_encoder_layers.append(nn.LeakyReLU())
-        for l in range(len(hidden_dims)-1):
-            ado_encoder_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
+        for l in range(len(embed_dims)-1):
+            ado_encoder_layers.append(nn.Linear(embed_dims[l], embed_dims[l + 1]))
             ado_encoder_layers.append(activation)
         # encoder_layers.append(nn.Sigmoid())
         self.ado_encoder = nn.Sequential(*ado_encoder_layers)
@@ -177,12 +178,13 @@ class EncoderAttention4(nn.Module):
         self.selector_extractors = nn.ModuleList()
         self.latent_extractors = nn.ModuleList()
         for i in range(attention_heads):
-          self.key_extractors.append(nn.Linear(hidden_dims[-1], self.attend_dim, bias=False))
-          self.selector_extractors.append(nn.Linear(hidden_dims[-1], self.attend_dim, bias=False))
-          self.latent_extractors.append(nn.Sequential(nn.Linear(hidden_dims[-1], self.attend_dim), nn.LeakyReLU()))
+          self.key_extractors.append(nn.Linear(embed_dims[-1], self.attend_dim, bias=False))
+          self.selector_extractors.append(nn.Linear(embed_dims[-1], self.attend_dim, bias=False))
+          self.latent_extractors.append(nn.Sequential(nn.Linear(embed_dims[-1], self.attend_dim), nn.LeakyReLU()))
 
         # Projection layer
-        self.projection_net = nn.Linear(hidden_dims[-1], hidden_dims[-1])
+        # self.projection_net = nn.Linear(hidden_dims[-1], hidden_dims[-1])
+        self.projection_net = nn.Linear(attend_dims[-1], self.attend_dim)
 
         # # Dropout layers
         # drop_prob = 0.0
@@ -255,17 +257,19 @@ class Head(nn.Module):
         self.ego_query = nn.Linear(ego_size, head_size, bias=False)
         self.ado_value = nn.Sequential(nn.Linear(ado_size, head_size), nn.LeakyReLU())
 
-    def forward(self, x_ego, x_ado):
+    def forward(self, x_ego, x_ado, return_weights=False):
         # x_ego: [B, 1, Ce]
         # x_ado: [B, O, Ca]
-        k = self.ado_key(x_ado)    # [B, 1, hs]
-        q = self.ego_query(x_ego)  # [B, O, hs]
+        k = self.ado_key(x_ado)    # [B, O, hs]
+        q = self.ego_query(x_ego)  # [B, 1, hs]
         # compute attention scores ("affinities")
         watt = q @ k.transpose(-2,-1) * k.shape[-1]**-0.5 # (B, 1, hs) @ (B, hs, O) -> (B, 1, O)
         watt = F.softmax(watt, dim=-1) # (B, 1, O)
         # perform the weighted aggregation of the values
         v = self.ado_value(x_ado)   # (B, O, hs)
         out = watt @ v # (B, 1, O) @ (B, O, hs) -> (B, 1, hs)
+        if return_weights:
+            return watt
         return out
 
 
@@ -277,8 +281,10 @@ class MultiHeadAttention(nn.Module):
         self.heads = nn.ModuleList([Head(ego_size, ado_size, head_size) for _ in range(num_heads)])
         self.proj = nn.Linear(head_size * num_heads, n_embd)
 
-    def forward(self, x_ego, x_ado):
+    def forward(self, x_ego, x_ado, return_weights=False):
         out = torch.cat([h(x_ego, x_ado) for h in self.heads], dim=-1)
+        if return_weights:
+            return out
         out = self.proj(out)
         return out
 
@@ -311,10 +317,12 @@ class Block(nn.Module):
         self.ln1_ado = nn.LayerNorm(ado_size)
         self.ln2 = nn.LayerNorm(n_embd)
 
-    def forward(self, x_ego, x_ado):
+    def forward(self, x_ego, x_ado, return_weights=False):
         x_ego = self.ln1_ego(x_ego)  # TODO: where to out LayerNorm
         x_ado = self.ln1_ado(x_ado)
         x = self.sa(x_ego, x_ado)
+        if return_weights:
+            return x
         x = x + self.ffwd(self.ln2(x))
         return x
 
@@ -370,7 +378,7 @@ class EncoderAttention4v2(nn.Module):
           )
 
 
-  def forward(self, observations):
+  def forward(self, observations, return_weights=False):
 
       multi_ego = False
       obs_shape = observations.shape
@@ -392,6 +400,8 @@ class EncoderAttention4v2(nn.Module):
 
       z_ado = self.att_block(x_ego, x_ado)
       z_ado = z_ado.squeeze(dim=1)
+      if return_weights:
+          return z_ado
 
       new_obs = torch.cat((obs_ego, z_ado), dim=1)
       if multi_ego:
@@ -418,6 +428,7 @@ def get_encoder(num_ego_obs, num_ado_obs, embed_dims, attend_dims, teamsize, num
     if encoder_type=='identity':
         encoder = EncoderIdentity()
     elif encoder_type=='attention4':
+        # encoder = EncoderAttention4(
         encoder = EncoderAttention4v2(
           num_ego_obs=num_ego_obs, 
           num_ado_obs=num_ado_obs, 

@@ -107,8 +107,8 @@ class MultiTeamBilevelActorCritic(nn.Module):
         self.draw_probs_unnorm[-3:] = 0.6/3
 
         self.past_models = [copy.deepcopy(self.teamacs[0].state_dict())]
-        self.past_ratings_mu = [0]
-        self.past_ratings_sigma = [self.agentratings[0][0].sigma]
+        self.past_ratings_mu = [0] * len(self.past_models)
+        self.past_ratings_sigma = [self.agentratings[0][0].sigma] * len(self.past_models)
 
     def reset(self, dones=None):
         pass
@@ -222,7 +222,7 @@ class MultiTeamBilevelActorCritic(nn.Module):
     def new_rating(self, mu, sigma):
         return (trueskill.Rating(mu = mu, sigma = sigma ),) 
 
-    def redraw_ac_networks_KL_divergence(self, obs_batch):
+    def redraw_ac_networks_KL_divergence(self, obs_batch, update_pop=True):
         current_models = self.teamacs.copy()
         kl_divs = []
         self.teamacs[0].ac.update_distribution(obs_batch)
@@ -235,7 +235,7 @@ class MultiTeamBilevelActorCritic(nn.Module):
         self.teamacs = current_models
         print('[MAAC POPULATION UPDATE] KLs', kl_divs)
 
-        if np.min(kl_divs)>0.05:  # FIXME: put back and fix
+        if np.min(kl_divs)>0.05 and update_pop:  # FIXME: put back and fix
             self.redraw_ac_networks(save = True)
         else:
             self.redraw_ac_networks(save = False)
@@ -256,11 +256,16 @@ class MultiTeamBilevelActorCritic(nn.Module):
 
         #select model to load
         #renormalize dist
-        if len(self.past_models) !=self.max_num_models:
-            prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):]) * self.draw_probs_unnorm[-len(self.past_models):]
-        else:
-            prob = 1/np.sum(self.draw_probs_unnorm + 1e-4) *(self.draw_probs_unnorm + 1e-4)
-        
+        # if len(self.past_models) !=self.max_num_models:
+        #     prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):]) * self.draw_probs_unnorm[-len(self.past_models):]
+        # else:
+        #     prob = 1/np.sum(self.draw_probs_unnorm + 1e-4) *(self.draw_probs_unnorm + 1e-4)
+
+        # HACK: 0.5 latest, 0.5 prior
+        prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):]) * self.draw_probs_unnorm[-len(self.past_models):]
+        prob *= 0.5
+        prob[-1] += 0.5
+
         idx = np.random.choice(len(self.past_models), self.num_teams-1, p = prob)
         for agent_id, past_model_id in enumerate(idx):
             op_id = agent_id + 1
