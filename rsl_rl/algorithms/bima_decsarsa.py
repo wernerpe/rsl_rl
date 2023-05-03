@@ -43,7 +43,7 @@ class BimaDecSARSA:
     target_actor_critic: MultiTeamBilevelDecCritic
     def __init__(self,
                  actor_critic,
-                 centralized_value=False,
+                 centralized_value='independent',
                  num_learning_epochs=1,
                  num_mini_batches=1,
                  clip_param=0.2,
@@ -99,7 +99,14 @@ class BimaDecSARSA:
         self.n_critics = self.actor_critic.n_critics
         assert self.n_critics==1
 
-        self.centralized_value = centralized_value
+        
+        self.centralized_value_action = False
+        self.centralized_value_agents = False
+
+        if centralized_value in ['action', 'agents']:
+            self.centralized_value_action = True
+        if centralized_value == 'agents':
+            self.centralized_value_agents = True
 
         self._value_stdv_run_mean = 0.05
         self._value_stdv_run_stdv = 0.0
@@ -128,11 +135,14 @@ class BimaDecSARSA:
     # def clip_actions(self, actions):
     #   return torch.clamp(actions, min=self._actions_min, max=self._actions_max)
 
-    def compute_value_epsgreedy(self, q_pred):
+    def compute_value_epsgreedy(self, q_pred):  # , centralized=True):
         # Expected SARSA
         # q_pred = self.target_actor_critic.evaluate(obs)[:, self.actor_critic.teams[0], :]
-        q_max = q_pred.amax(dim=-1).mean(dim=-1, keepdim=True)
-        q_mean = q_pred.mean(dim=-1).mean(dim=-1, keepdim=True)
+        q_max = q_pred.amax(dim=-1)
+        q_mean = q_pred.mean(dim=-1)
+        # if centralized:
+        #     q_max = q_max.mean(dim=-1, keepdim=True)
+        #     q_mean = q_mean.mean(dim=-1, keepdim=True)
         epsilon = self.actor_critic.teamacs[0].ac.epsilon
         return (1.0 - epsilon) * q_max + epsilon * q_mean
 
@@ -157,7 +167,7 @@ class BimaDecSARSA:
         print('[DecQL] Updated target network')
     
     def process_env_step(self, rewards, next_observations, dones, infos):
-        self.transition.rewards = rewards[:, self.actor_critic.teams[0], :].clone()
+        self.transition.rewards = rewards[:, self.actor_critic.teams[0], :].clone().repeat(1, 1, self.actor_critic.num_actions)
         self.transition.next_observations = next_observations[:, self.actor_critic.teams[0], :]
         self.transition.dones = dones
         if 'agent_active' in infos:
@@ -166,9 +176,9 @@ class BimaDecSARSA:
         # Bootstrapping on time outs
         if 'time_outs' in infos:  # TODO: check how many unsqueezes
             if self.use_sdqn or self.use_mdqn:
-                bootstrap_target_value = self.entropy_temperature * torch.logsumexp(self.transition.target_curr_values / self.entropy_temperature, axis=-1).mean(dim=-1, keepdim=True)
+                bootstrap_target_value = self.entropy_temperature * torch.logsumexp(self.transition.target_curr_values / self.entropy_temperature, axis=-1)  # .mean(dim=-1, keepdim=True)
             else:
-                bootstrap_target_value = self.compute_value_epsgreedy(self.transition.target_curr_values)
+                bootstrap_target_value = self.compute_value_epsgreedy(self.transition.target_curr_valuesm)  # , centralized=self.centralized_value)
             self.transition.rewards += self.gamma * bootstrap_target_value * infos['time_outs'].unsqueeze(1).unsqueeze(1).to(self.device)
 
         is_not_done = (1.0 - 1.0 * self.transition.dones.unsqueeze(dim=-1).unsqueeze(dim=-1))
@@ -198,23 +208,31 @@ class BimaDecSARSA:
             act_idx_batch = torch.argmax(self.actor_critic.teamacs[0].ac.convert_action_to_onehot(act_batch), dim=-1)
 
             if self.use_sdqn or self.use_mdqn:
-                target_val_batch = self.entropy_temperature * torch.logsumexp(target_next_val_batch / self.entropy_temperature, axis=-1).mean(axis=-1, keepdim=True)
+                target_val_batch = self.entropy_temperature * torch.logsumexp(target_next_val_batch / self.entropy_temperature, axis=-1)
+                target_val_batch = (1.0 - dones_batch[..., None]) * target_val_batch
             else:
-                target_val_batch = self.compute_value_epsgreedy(target_next_val_batch)
+                target_val_batch = self.compute_value_epsgreedy(target_next_val_batch)  # , centralized=self.centralized_value)
             if self.use_mdqn:
                 munchhausen_term = self.entropy_temperature * torch.log_softmax(target_curr_val_batch / self.entropy_temperature, axis=-1)
-                munchausen_term_a = torch.gather(munchhausen_term, -1, act_idx_batch.unsqueeze(dim=-1)).mean(dim=-2)
+                munchausen_term_a = torch.gather(munchhausen_term, -1, act_idx_batch.unsqueeze(dim=-1)).squeeze(dim=-1)  # .mean(dim=-2)
                 munchausen_term_a = torch.clip(munchausen_term_a, min=self.clip_value_min, max=0.)
                 rew_batch += self.munchausen_coefficient * munchausen_term_a
 
             target = (rew_batch + self.gamma * target_val_batch).detach()
 
             val_all_batch = self.actor_critic.evaluate(obs_batch[:, self.actor_critic.teams[0], :])
-            val_act_batch = torch.gather(val_all_batch, -1, act_idx_batch.unsqueeze(dim=-1)).mean(dim=-2)
+            val_act_batch = torch.gather(val_all_batch, -1, act_idx_batch.unsqueeze(dim=-1)).squeeze(dim=-1)  # TODO: check whether [..., 0] faster
+            
+            if self.centralized_value_action:
+                target = target.mean(axis=-1)
+                val_act_batch = val_act_batch.mean(dim=-1)
+            if self.centralized_value_agents:
+                target = target.mean(axis=-1)
+                val_act_batch = val_act_batch.mean(dim=-1)
 
             td_error = target - val_act_batch
 
-            value_loss = self.loss_fc(td_error.squeeze(), (0*obs_batch[..., 0]).squeeze())
+            value_loss = self.loss_fc(td_error.squeeze(), (0*td_error).squeeze())
 
             # value_loss = value_loss.mean()
             target_mean = target.mean()
@@ -252,7 +270,7 @@ class BimaDecSARSA:
                                             'mean_values': mean_values,
                                             }
 
-    def update_population(self, update_pop):
+    def update_population(self, update_pop, idx=None, idx_del=None):
         # self.actor_critic.redraw_ac_networks()
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
@@ -263,7 +281,7 @@ class BimaDecSARSA:
         batch = next(generator)
         obs_batch = batch[0]
 
-        self.actor_critic.redraw_ac_networks_KL_divergence(obs_batch, update_pop)  # FIXME: uncomment & fix
+        return self.actor_critic.redraw_ac_networks_KL_divergence(obs_batch, update_pop, idx, idx_del)  # FIXME: uncomment & fix
 
     def update_ratings(self, eval_ranks, eval_ep_duration, max_ep_len):
         eval_team_ranks = -100. * torch.ones_like(eval_ranks[..., :len(self.actor_critic.teams)])

@@ -339,7 +339,7 @@ class BimaSARSAStorage:
 
         # Core
         self.observations = torch.zeros(num_transitions_per_env, num_envs, num_agents, *obs_shape, device=self.device)
-        self.rewards = torch.zeros(num_transitions_per_env, num_envs, num_agents, 1, device=self.device)
+        self.rewards = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, device=self.device)  # 1
         self.actions = torch.zeros(num_transitions_per_env, num_envs, num_agents, *actions_shape, device=self.device)
         self.next_observations = torch.zeros(num_transitions_per_env, num_envs, num_agents, *obs_shape, device=self.device)
         self.dones = torch.zeros(num_transitions_per_env, num_envs, num_agents, device=self.device).byte()

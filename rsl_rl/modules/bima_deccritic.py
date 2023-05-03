@@ -107,8 +107,8 @@ class MultiTeamBilevelDecCritic(nn.Module):
         self.draw_probs_unnorm[-3:] = 0.6/3
 
         self.past_models = [copy.deepcopy(self.teamacs[0].state_dict())]
-        self.past_ratings_mu = [0]
-        self.past_ratings_sigma = [self.agentratings[0][0].sigma]
+        self.past_ratings_mu = [0] * len(self.past_models)
+        self.past_ratings_sigma = [self.agentratings[0][0].sigma] * len(self.past_models)
 
     def reset(self, dones=None):
         pass
@@ -222,7 +222,7 @@ class MultiTeamBilevelDecCritic(nn.Module):
     def new_rating(self, mu, sigma):
         return (trueskill.Rating(mu = mu, sigma = sigma ),) 
 
-    def redraw_ac_networks_KL_divergence(self, obs_batch, update_pop=True):
+    def redraw_ac_networks_KL_divergence(self, obs_batch, update_pop=True, idx=None, idx_del=None):
         current_models = self.teamacs.copy()
         kl_divs = []
         self.teamacs[0].ac.update_distribution(obs_batch)
@@ -235,12 +235,12 @@ class MultiTeamBilevelDecCritic(nn.Module):
         self.teamacs = current_models
         print('[MAAC POPULATION UPDATE] KLs', kl_divs)
 
-        if np.min(kl_divs)>0.05 and update_pop:  # FIXME: put back and fix
-            self.redraw_ac_networks(save = True)
-        else:
-            self.redraw_ac_networks(save = False)
+        save_ckpt = False
+        if update_pop:  #  and np.min(kl_divs)>0.05:  # FIXME: put back and fix
+            save_ckpt = True
+        return self.redraw_ac_networks(save=save_ckpt, idx=idx, idx_del=idx_del)
 
-    def redraw_ac_networks(self, save):
+    def redraw_ac_networks(self, save, idx=None, idx_del=None):
 
         #update population of competing agents, here simply load 
         #old version of agent 1 into ac2 slot
@@ -249,7 +249,8 @@ class MultiTeamBilevelDecCritic(nn.Module):
             self.past_ratings_mu.append(self.agentratings[0][0].mu)
             self.past_ratings_sigma.append(self.agentratings[0][0].sigma)
             if len(self.past_models)> self.max_num_models:
-                idx_del = np.random.randint(0, self.max_num_models-2)
+                if idx_del is None:
+                    idx_del = np.random.randint(0, self.max_num_models-2)
                 del self.past_models[idx_del]
                 del self.past_ratings_mu[idx_del]
                 del self.past_ratings_sigma[idx_del]
@@ -266,7 +267,8 @@ class MultiTeamBilevelDecCritic(nn.Module):
         prob *= 0.5
         prob[-1] += 0.5
 
-        idx = np.random.choice(len(self.past_models), self.num_teams-1, p = prob)
+        if idx is None:
+            idx = np.random.choice(len(self.past_models), self.num_teams-1, p = prob)
         for agent_id, past_model_id in enumerate(idx):
             op_id = agent_id + 1
 
@@ -280,6 +282,8 @@ class MultiTeamBilevelDecCritic(nn.Module):
 
         # rating_train_pol = (trueskill.Rating(mu = self.agentratings[0][0].mu, sigma = self.agentratings[0][0].sigma),)
         # self.agentratings[0] = rating_train_pol 
+
+        return idx, idx_del
         
 
 

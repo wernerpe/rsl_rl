@@ -140,9 +140,9 @@ class BimaOnPolicyRunner:
                                                         device=device,
                                                         **self.policy_cfg).to(self.device)
         alg_class_hl = eval(self.cfg["algorithm_class_hl_name"]) # BilevelPPO
-        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=True, device=self.device, schedule="adaptive", clip_param=0.2, entropy_coef=0.001, gamma=0.90, **self.alg_cfg)
+        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=self.cfg["centralized_value_hl"], device=self.device, schedule="adaptive", clip_param=0.2, entropy_coef=0.001, gamma=0.90, **self.alg_cfg)
         alg_class_ll = eval(self.cfg["algorithm_class_ll_name"]) # BilevelPPO
-        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=False, device=self.device, schedule="adaptive", clip_param=0.2, entropy_coef=0.002, gamma=0.99, **self.alg_cfg)
+        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=self.cfg["centralized_value_ll"], device=self.device, schedule="adaptive", clip_param=0.2, entropy_coef=0.002, gamma=0.99, **self.alg_cfg)
 
         self.num_steps_per_env_hl = self.cfg["num_steps_per_env_hl"]
         self.num_steps_per_env_ll = self.cfg["num_steps_per_env_ll"]
@@ -362,8 +362,8 @@ class BimaOnPolicyRunner:
                                 
                 if (it % self.population_sample_interval == 0) and (it != self.initial_learning_iteration):  # NOTE: self-play
                     update_pop = (it % self.population_update_interval == 0)
-                    self.alg_hl.update_population(update_pop)
-                    self.alg_ll.update_population(update_pop)
+                    idx_sample, idx_delete = self.alg_ll.update_population(update_pop)
+                    self.alg_hl.update_population(update_pop, idx=idx_sample, idx_del=idx_delete)
                                 
                 stop_ll = time.time()
                 learn_time_ll = stop_ll - start_ll
@@ -467,8 +467,8 @@ class BimaOnPolicyRunner:
                 mean_value_loss_hl, mean_surrogate_loss_hl, mean_entropy_loss_hl, mean_stats_hl = self.alg_hl.update()
                 if  (it % self.population_sample_interval == 0) and (it != self.initial_learning_iteration):  # NOTE: self-play
                     update_pop = (it % self.population_update_interval == 0)
-                    self.alg_hl.update_population(update_pop)
-                    self.alg_ll.update_population(update_pop)
+                    idx_sample, idx_delete = self.alg_ll.update_population(update_pop)
+                    self.alg_hl.update_population(update_pop, idx=idx_sample, idx_del=idx_delete)
                 stop_hl = time.time()
                 learn_time_hl = stop_hl - start_hl
                 if self.log_dir is not None:

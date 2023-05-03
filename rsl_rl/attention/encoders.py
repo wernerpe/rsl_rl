@@ -257,7 +257,7 @@ class Head(nn.Module):
         self.ego_query = nn.Linear(ego_size, head_size, bias=False)
         self.ado_value = nn.Sequential(nn.Linear(ado_size, head_size), nn.LeakyReLU())
 
-    def forward(self, x_ego, x_ado, return_weights=False):
+    def forward(self, x_ego, x_ado):
         # x_ego: [B, 1, Ce]
         # x_ado: [B, O, Ca]
         k = self.ado_key(x_ado)    # [B, O, hs]
@@ -268,8 +268,6 @@ class Head(nn.Module):
         # perform the weighted aggregation of the values
         v = self.ado_value(x_ado)   # (B, O, hs)
         out = watt @ v # (B, 1, O) @ (B, O, hs) -> (B, 1, hs)
-        if return_weights:
-            return watt
         return out
 
 
@@ -281,10 +279,8 @@ class MultiHeadAttention(nn.Module):
         self.heads = nn.ModuleList([Head(ego_size, ado_size, head_size) for _ in range(num_heads)])
         self.proj = nn.Linear(head_size * num_heads, n_embd)
 
-    def forward(self, x_ego, x_ado, return_weights=False):
+    def forward(self, x_ego, x_ado):
         out = torch.cat([h(x_ego, x_ado) for h in self.heads], dim=-1)
-        if return_weights:
-            return out
         out = self.proj(out)
         return out
 
@@ -317,12 +313,10 @@ class Block(nn.Module):
         self.ln1_ado = nn.LayerNorm(ado_size)
         self.ln2 = nn.LayerNorm(n_embd)
 
-    def forward(self, x_ego, x_ado, return_weights=False):
+    def forward(self, x_ego, x_ado):
         x_ego = self.ln1_ego(x_ego)  # TODO: where to out LayerNorm
         x_ado = self.ln1_ado(x_ado)
         x = self.sa(x_ego, x_ado)
-        if return_weights:
-            return x
         x = x + self.ffwd(self.ln2(x))
         return x
 
@@ -378,7 +372,7 @@ class EncoderAttention4v2(nn.Module):
           )
 
 
-  def forward(self, observations, return_weights=False):
+  def forward(self, observations):
 
       multi_ego = False
       obs_shape = observations.shape
@@ -400,8 +394,6 @@ class EncoderAttention4v2(nn.Module):
 
       z_ado = self.att_block(x_ego, x_ado)
       z_ado = z_ado.squeeze(dim=1)
-      if return_weights:
-          return z_ado
 
       new_obs = torch.cat((obs_ego, z_ado), dim=1)
       if multi_ego:
