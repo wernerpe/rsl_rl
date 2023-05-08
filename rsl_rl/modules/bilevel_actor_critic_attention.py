@@ -126,7 +126,7 @@ class BilevelActorCriticAttention(nn.Module):
 
         self.std_per_obs = kwargs['std_per_obs']
         self.std_ini = init_noise_std
-        self.std_min = 5.e-2  # 3.e-2  # 1.e-2
+        self.std_min = 5.e-2  # 5.e-2  # 3.e-2  # 1.e-2
 
         # # Encoder
         # self.encoder = encoder
@@ -185,8 +185,8 @@ class BilevelActorCriticAttention(nn.Module):
           train_encoder=train_encoder,
         ) for _ in range(self.n_critics)])
 
-        print(f"Actor MLP: {self.actor}")
-        print(f"Critic MLP: {self.critics[0]}")
+        # print(f"Actor MLP: {self.actor}")  # FIXME: put back in if desired
+        # print(f"Critic MLP: {self.critics[0]}")  # FIXME: put back in if desired
 
         # Action noise
         # self.std = nn.Parameter((init_noise_std-self.std_min) * torch.ones(num_actions)  + self.std_min)
@@ -340,7 +340,12 @@ class BilevelActorCriticAttention(nn.Module):
             return self.convert_onehot_to_action(actions_onehot)
         else:
             # Gaussian
-            actions_mean_raw = self.actor(observations)
+            output_merged = self.actor(observations)
+            if self.std_per_obs:
+                output = output_merged.view((*output_merged.shape[:-1], self.num_actions, 2))
+                actions_mean_raw = output[..., 0]
+            else:
+                actions_mean_raw = output_merged
             actions_mean = self.transform_mean_prediction(actions_mean_raw)
             return actions_mean
 

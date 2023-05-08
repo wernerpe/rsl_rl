@@ -155,7 +155,7 @@ class BilevelDecCriticAttention(nn.Module):
           teamsize = teamsize
         )
 
-        print(f"Critic MLP: {self.critic}")
+        # print(f"Critic MLP: {self.critic}")  # FIXME: put back in if desired
 
         # Action noise
         self.epsilon = 0.2  # 0.1

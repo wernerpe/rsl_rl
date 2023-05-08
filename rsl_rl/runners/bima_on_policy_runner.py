@@ -140,9 +140,9 @@ class BimaOnPolicyRunner:
                                                         device=device,
                                                         **self.policy_cfg).to(self.device)
         alg_class_hl = eval(self.cfg["algorithm_class_hl_name"]) # BilevelPPO
-        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=self.cfg["centralized_value_hl"], device=self.device, schedule="adaptive", clip_param=0.2, entropy_coef=0.001, gamma=0.90, **self.alg_cfg)
+        self.alg_hl: BimaPPO = alg_class_hl(actor_critic_hl, centralized_value=self.cfg["centralized_value_hl"], device=self.device, schedule="adaptive", clip_param=self.alg_cfg["clip_param_hl"], entropy_coef=self.alg_cfg["entropy_coef_hl"], gamma=self.alg_cfg["gamma_hl"], **self.alg_cfg)  # gamma=0.9, entropy=0.001
         alg_class_ll = eval(self.cfg["algorithm_class_ll_name"]) # BilevelPPO
-        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=self.cfg["centralized_value_ll"], device=self.device, schedule="adaptive", clip_param=0.2, entropy_coef=0.002, gamma=0.99, **self.alg_cfg)
+        self.alg_ll: BimaPPO = alg_class_ll(actor_critic_ll, centralized_value=self.cfg["centralized_value_ll"], device=self.device, schedule="adaptive", clip_param=self.alg_cfg["clip_param_ll"], entropy_coef=self.alg_cfg["entropy_coef_ll"], gamma=self.alg_cfg["gamma_ll"], **self.alg_cfg)  # entropy=0.002
 
         self.num_steps_per_env_hl = self.cfg["num_steps_per_env_hl"]
         self.num_steps_per_env_ll = self.cfg["num_steps_per_env_ll"]
@@ -425,7 +425,11 @@ class BimaOnPolicyRunner:
                             # self.env.viewer.update_attention(self.alg_ll.actor_critic.teamacs[0].ac.actor._encoder.attention_weights)
 
                             self.env.set_ll_action_stats(self.alg_ll.actor_critic.action_mean, self.alg_ll.actor_critic.action_std)
+
+                            # t0 = time.time()
                             obs, privileged_obs, rewards, dones, infos = self.env.step(actions_ll)
+                            # print("Time = " + str(time.time() - t0))
+
                             critic_obs = privileged_obs if privileged_obs is not None else obs
                             obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
                             if rewards.shape[-1]==2:
