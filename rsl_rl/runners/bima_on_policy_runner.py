@@ -265,6 +265,7 @@ class BimaOnPolicyRunner:
             self.env.set_dropout_prob(it)
             self.env.set_video_log_ep(it)
             self.env.set_ppc_prob(it)
+            self.env.set_vm_noise_scale_ado(it)
 
             # if it > self.iters_ado_ppc:
             #     self.env.set_steer_ado_ppc(False)

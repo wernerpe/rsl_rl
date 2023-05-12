@@ -226,9 +226,9 @@ class BimaDecSARSA:
             if self.centralized_value_action:
                 target = target.mean(axis=-1)
                 val_act_batch = val_act_batch.mean(dim=-1)
-            if self.centralized_value_agents:
-                target = target.mean(axis=-1)
-                val_act_batch = val_act_batch.mean(dim=-1)
+                if self.centralized_value_agents:
+                    target = target.mean(axis=-1)
+                    val_act_batch = val_act_batch.mean(dim=-1)
 
             td_error = target - val_act_batch
 
