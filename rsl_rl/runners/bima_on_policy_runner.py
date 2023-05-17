@@ -67,6 +67,8 @@ class BimaOnPolicyRunner:
             num_critic_obs = self.env.num_privileged_obs 
         else:
             num_critic_obs = self.env.num_obs
+
+        self.use_hierarchical_policy = self.cfg["use_hierarchical_policy"]
         
         self.num_actions_hl = self.env.num_actions_hl
         self.num_obs_add_ll = self.env.num_obs_add_ll
@@ -201,6 +203,7 @@ class BimaOnPolicyRunner:
 
         iter_per_ll = self.iter_per_ll  # 200
         iter_per_hl = self.iter_per_hl  # 20
+
         iter_switch = [self.initial_learning_iteration]  # 0
         while iter_switch[-1] < num_learning_iterations + self.initial_learning_iteration:
             if self.start_on_ll:
@@ -309,8 +312,12 @@ class BimaOnPolicyRunner:
                         self.env.set_hl_action_probs(self.alg_hl.actor_critic.action_probs)
                         actions_hl = self.env.project_into_track_frame(actions_hl_raw)
                         
-                        obs_ll = torch.concat((obs, actions_hl), dim=-1)
-                        critic_obs_ll = torch.concat((critic_obs, actions_hl), dim=-1)
+                        if self.use_hierarchical_policy:
+                            obs_ll = torch.concat((obs, actions_hl), dim=-1)
+                            critic_obs_ll = torch.concat((critic_obs, actions_hl), dim=-1)
+                        else:
+                            obs_ll = obs
+                            critic_obs_ll = critic_obs
                         # obs_ll = obs
                         # critic_obs_ll = critic_obs
                         actions_ll = self.alg_ll.act(obs_ll, critic_obs_ll)
