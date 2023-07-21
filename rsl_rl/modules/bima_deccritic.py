@@ -147,6 +147,14 @@ class MultiTeamBilevelDecCritic(nn.Module):
     @property
     def parameters(self):
         return self.teamacs[0].parameters
+    
+    @property
+    def parameters_critic(self):
+        return self.teamacs[0].parameters_critic
+    
+    @property
+    def parameters_svo(self):
+        return self.teamacs[0].parameters_svo
 
     # @property
     def state_dict(self):
@@ -201,6 +209,10 @@ class MultiTeamBilevelDecCritic(nn.Module):
         # # value[:,:, 1] = torch.sum(value[:,:,1], dim =1).view(-1, 1)
         # value[..., 1] = torch.mean(value[...,1], dim=-1).unsqueeze(dim=-1)
         return value
+    
+    def get_svo(self, critic_observations, **kwargs):
+        svo = self.teamacs[0].get_svo(critic_observations)
+        return svo
 
     def get_ratings(self,):
         return self.agentratings
@@ -388,6 +400,14 @@ class TeamBilevelDecCritic(nn.Module):
     @property
     def parameters(self):
        return self.ac.parameters
+    
+    @property
+    def parameters_critic(self):
+       return self.ac.critic.parameters
+    
+    @property
+    def parameters_svo(self):
+       return self.ac.svo.parameters
 
     @property
     def state_dict(self):
@@ -443,3 +463,7 @@ class TeamBilevelDecCritic(nn.Module):
     def evaluate(self, critic_observations, **kwargs):
         value = self.ac.evaluate(critic_observations)
         return value
+    
+    def get_svo(self, critic_observations, **kwargs):
+        svo = self.ac.get_svo(critic_observations)
+        return svo

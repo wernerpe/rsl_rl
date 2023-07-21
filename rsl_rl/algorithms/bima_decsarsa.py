@@ -73,7 +73,8 @@ class BimaDecSARSA:
         self.actor_critic.to(self.device)
         self.target_actor_critic = copy.deepcopy(actor_critic)
         self.storage = None # initialized later
-        self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
+        self.optimizer = optim.Adam(self.actor_critic.parameters_critic(), lr=learning_rate)
+        self.optimizer_svo = optim.Adam(self.actor_critic.parameters_svo(), lr=learning_rate)
         self.transition = BimaSARSAStorage.Transition()
 
         # self._actions_min = torch.concat((
@@ -122,7 +123,10 @@ class BimaDecSARSA:
         self.munchausen_coefficient = 0.9
         self.clip_value_min = -1e3
 
+        self.use_svo = True  # FIXME: integrate properly
+
         self.num_bins = actor_critic.teamacs[0].ac.num_bins
+        self.svo_bins = actor_critic.teamacs[0].ac.svo_bins
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, num_agents):
         self.storage = BimaSARSAStorage(num_envs, num_transitions_per_env, actor_obs_shape, action_shape, num_agents, self.n_critics, self.num_bins, self.device)
@@ -177,7 +181,7 @@ class BimaDecSARSA:
         # Bootstrapping on time outs
         if 'time_outs' in infos:  # TODO: check how many unsqueezes
             if self.use_sdqn or self.use_mdqn:
-                bootstrap_target_value = self.entropy_temperature * torch.logsumexp(self.transition.target_curr_values / self.entropy_temperature, axis=-1)  # .mean(dim=-1, keepdim=True)
+                bootstrap_target_value = self.entropy_temperature * torch.logsumexp(self.transition.target_curr_values / self.entropy_temperature, dim=-1)  # .mean(dim=-1, keepdim=True)
             else:
                 bootstrap_target_value = self.compute_value_epsgreedy(self.transition.target_curr_valuesm)  # , centralized=self.centralized_value)
             self.transition.rewards += self.gamma * bootstrap_target_value * infos['time_outs'].unsqueeze(1).unsqueeze(1).to(self.device)
@@ -199,6 +203,10 @@ class BimaDecSARSA:
         mean_target = 0
         mean_values = 0
 
+        mean_svo_loss = 0
+        mean_svo_prob = torch.zeros((self.svo_bins,), dtype=torch.float32, device=self.device)
+        mean_svo_logit = torch.zeros((self.svo_bins,), dtype=torch.float32, device=self.device)
+
 
         if self.actor_critic.is_attentive:
             generator = self.storage.attention_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
@@ -209,12 +217,12 @@ class BimaDecSARSA:
             act_idx_batch = torch.argmax(self.actor_critic.teamacs[0].ac.convert_action_to_onehot(act_batch), dim=-1)
 
             if self.use_sdqn or self.use_mdqn:
-                target_val_batch = self.entropy_temperature * torch.logsumexp(target_next_val_batch / self.entropy_temperature, axis=-1)
+                target_val_batch = self.entropy_temperature * torch.logsumexp(target_next_val_batch / self.entropy_temperature, dim=-1)
                 target_val_batch = (1.0 - dones_batch[..., None]) * target_val_batch
             else:
                 target_val_batch = self.compute_value_epsgreedy(target_next_val_batch)  # , centralized=self.centralized_value)
             if self.use_mdqn:
-                munchhausen_term = self.entropy_temperature * torch.log_softmax(target_curr_val_batch / self.entropy_temperature, axis=-1)
+                munchhausen_term = self.entropy_temperature * torch.log_softmax(target_curr_val_batch / self.entropy_temperature, dim=-1)
                 munchausen_term_a = torch.gather(munchhausen_term, -1, act_idx_batch.unsqueeze(dim=-1)).squeeze(dim=-1)  # .mean(dim=-2)
                 munchausen_term_a = torch.clip(munchausen_term_a, min=self.clip_value_min, max=0.)
                 rew_batch += self.munchausen_coefficient * munchausen_term_a
@@ -225,30 +233,52 @@ class BimaDecSARSA:
             val_act_batch = torch.gather(val_all_batch, -1, act_idx_batch.unsqueeze(dim=-1)).squeeze(dim=-1)  # TODO: check whether [..., 0] faster
             
             if self.centralized_value_action:
-                target = target.mean(axis=-1)
+                target = target.mean(dim=-1)
                 val_act_batch = val_act_batch.mean(dim=-1)
                 if self.centralized_value_agents:
-                    target = target.mean(axis=-1)
-                    val_act_batch = val_act_batch.mean(dim=-1)
+                    if self.use_svo:
+                        svo_logits = self.actor_critic.get_svo(obs_batch[:, self.actor_critic.teams[0], :])
+
+                        temperature = 10.0
+                        svo_probs = torch.softmax(svo_logits/temperature, dim=-1)
+
+                        svo_values = torch.linspace(0, 1, self.svo_bins, device='cuda:0')[None, None]
+                        svo_target = svo_values*target[..., None] + (1-svo_values)*target.flip(-1)[..., None]
+                        target = (svo_probs.squeeze()*svo_target).sum(dim=-1)
+
+                        # Only focus on ego agent
+                        target = target[..., 0]
+                        val_act_batch = val_act_batch[..., 0]
+                        svo_probs = svo_probs[:, 0, 0]
+
+                        mean_svo_prob += svo_probs.mean((0))
+                        mean_svo_logit += svo_logits[:, 0, 0].mean((0))
+                    else:
+                        target = target.mean(dim=-1)
+                        val_act_batch = val_act_batch.mean(dim=-1)
 
             td_error = target - val_act_batch
 
             value_loss = self.loss_fc(td_error.squeeze(), (0*td_error).squeeze())
+            svo_loss = -target.mean()
 
             # value_loss = value_loss.mean()
             target_mean = target.mean()
             values_mean = val_act_batch.mean()
 
-            loss = value_loss
+            loss = value_loss + svo_loss
 
             # Gradient step
             self.optimizer.zero_grad()
             loss.backward()
-            param_norm = nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
+            param_norm = nn.utils.clip_grad_norm_(self.actor_critic.parameters_critic(), self.max_grad_norm)
             self.optimizer.step()
+            self.optimizer_svo.step()
 
             mean_value_loss += value_loss.item() 
             mean_param_norm += param_norm.mean().item()
+
+            mean_svo_loss += svo_loss.item() 
 
             mean_target += target_mean.item()
             mean_values += values_mean.item()
@@ -264,11 +294,22 @@ class BimaDecSARSA:
         mean_target /= num_updates
         mean_values /= num_updates
 
+        mean_svo_loss /= num_updates
+        mean_svo_prob /= num_updates
+        mean_svo_prob = mean_svo_prob.detach().cpu().numpy()
+        mean_svo_prob = {'mean_svo_prob' + str(idx): mean_svo_prob[idx] for idx in range(len(mean_svo_prob))}
+        mean_svo_logit /= num_updates
+        mean_svo_logit = mean_svo_logit.detach().cpu().numpy()
+        mean_svo_logit = {'mean_svo_logit' + str(idx): mean_svo_logit[idx] for idx in range(len(mean_svo_logit))}
+
         self.storage.clear()
 
         return mean_value_loss, 0.0, 0.0, {'mean_norm': mean_param_norm,
                                             'mean_target': mean_target,
                                             'mean_values': mean_values,
+                                            'mean_svo_loss': mean_svo_loss,
+                                            **mean_svo_prob,
+                                            **mean_svo_logit,
                                             }
 
     def update_population(self, update_pop, idx=None, idx_del=None):

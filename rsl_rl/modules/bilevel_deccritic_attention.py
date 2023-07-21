@@ -100,6 +100,8 @@ class BilevelDecCriticAttention(nn.Module):
         self.n_critics = kwargs['numcritics']
         self.is_attentive = kwargs['attentive']
 
+        self.svo_bins = kwargs['svo_bins']
+
         # num_agent_max = num_agents
         num_ego_obs = num_ego_obs
         num_ado_obs = num_ado_obs
@@ -149,6 +151,19 @@ class BilevelDecCriticAttention(nn.Module):
           split_dim=enc_split_dim,
           num_actions=self.num_actions,
           num_bins=self.num_bins,
+          activation=activation,
+          encoder=encoder,
+          train_encoder=train_encoder,
+          teamsize = teamsize
+        )
+
+        # SVO function
+        self.svo = SVOPredictor(
+          input_dim=mlp_input_dim_c, 
+          hidden_dims=critic_hidden_dims, 
+          split_dim=enc_split_dim,
+          num_actions=1,
+          num_bins=self.svo_bins,
           activation=activation,
           encoder=encoder,
           train_encoder=train_encoder,
@@ -229,6 +244,9 @@ class BilevelDecCriticAttention(nn.Module):
 
     def evaluate(self, critic_observations, **kwargs):
         return self.critic(critic_observations)
+    
+    def get_svo(self, critic_observations, **kwargs):
+        return self.svo(critic_observations)
 
     def update_distribution_with_epsilon(self, observations, epsilon):
         q_values = self.evaluate(observations)
@@ -286,6 +304,51 @@ class CriticAttention(nn.Module):
         obs = torch.concat((latent, obs2), dim=-1)
         q_values = self._network(obs)
         return q_values.view((-1, self._teamsize, self._num_actions, self._num_bins))
+    
+
+class SVOPredictor(nn.Module):
+  
+    def __init__(self, input_dim, hidden_dims, split_dim, activation, encoder, num_actions, num_bins, teamsize, train_encoder=False, distributional=False):
+
+        super(SVOPredictor, self).__init__()
+
+        self.split_dim = split_dim
+
+        self._encoder = encoder
+        self._train_encoder = train_encoder
+        self._num_actions = num_actions
+        self._num_bins = num_bins
+        self._teamsize = teamsize
+
+        svo_layers = []
+        svo_layers.append(nn.Linear(input_dim, hidden_dims[0]))
+        svo_layers.append(nn.LayerNorm(hidden_dims[0]))
+        svo_layers.append(nn.Tanh())
+        # svo_layers.append(nn.ELU())
+        for l in range(len(hidden_dims)):
+            if l == len(hidden_dims) - 1:
+                svo_layers.append(nn.Linear(hidden_dims[l], num_actions * num_bins))
+            else:
+                svo_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
+                svo_layers.append(activation)
+        # NOTE: assume logit output
+        self._network = nn.Sequential(*svo_layers)
+
+    def forward(self, observations):
+        # split obs, don't encode target
+        obs1 = observations[..., :self.split_dim]
+        obs2 = observations[..., self.split_dim:]
+        latent = self._encoder(obs1)
+        if not self._train_encoder:
+            latent = latent.detach()
+        obs = torch.concat((latent, obs2), dim=-1)
+        svo_values = self._network(obs)
+
+        # # NOTE: maintaining better diversity (test)
+        # svo_values = 3.0 * torch.tanh(svo_values / 3.0)
+
+        return svo_values.view((-1, self._teamsize, self._num_actions, self._num_bins))
+  
 
 
 def get_activation(act_name):
