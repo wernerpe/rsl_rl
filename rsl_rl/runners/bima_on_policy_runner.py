@@ -93,6 +93,8 @@ class BimaOnPolicyRunner:
         numteams = self.policy_cfg['numteams']
         self.num_agents = teamsize * numteams
 
+        self.svo_bins = self.policy_cfg['svo_bins']
+
         # num_ego_obs = self.policy_cfg['num_ego_obs']
         # num_ado_obs = self.policy_cfg['num_ado_obs']
 
@@ -117,7 +119,7 @@ class BimaOnPolicyRunner:
             encoders.append(copy.deepcopy(encoders[0]))
         
         actor_critic_class_hl = eval(self.cfg["policy_class_hl_name"]) # BilevelActorCritic
-        actor_critic_hl: MultiTeamBilevelActorCritic = actor_critic_class_hl(
+        actor_critic_hl: MultiTeamBilevelDecCritic = actor_critic_class_hl(
                                                         num_actor_obs=self.env.num_obs,
                                                         num_critic_obs=num_critic_obs,
                                                         num_add_obs=0,
@@ -310,14 +312,15 @@ class BimaOnPolicyRunner:
 
 
                         self.env.set_hl_action_probs(self.alg_hl.actor_critic.action_probs)
+                        self.env.set_hl_svo_probs(torch.softmax(self.alg_hl.actor_critic.get_svo(critic_obs), dim=-1))
                         actions_hl = self.env.project_into_track_frame(actions_hl_raw)
                         
                         if self.use_hierarchical_policy:
                             obs_ll = torch.concat((obs, actions_hl), dim=-1)
                             critic_obs_ll = torch.concat((critic_obs, actions_hl), dim=-1)
                         else:
-                            obs_ll = obs
-                            critic_obs_ll = critic_obs
+                            obs_ll = torch.concat((obs, 0.0*actions_hl), dim=-1)  # obs  # TODO: what was this for?
+                            critic_obs_ll = torch.concat((critic_obs, 0.0*actions_hl), dim=-1)  # critic_obs  # TODO: what was this for?
                         # obs_ll = obs
                         # critic_obs_ll = critic_obs
                         actions_ll = self.alg_ll.act(obs_ll, critic_obs_ll)
@@ -423,6 +426,7 @@ class BimaOnPolicyRunner:
                     for i_hl in range(self.num_steps_per_env_hl):
                         actions_hl_raw = self.alg_hl.act(obs, critic_obs)
                         self.env.set_hl_action_probs(self.alg_hl.actor_critic.action_probs)
+                        self.env.set_hl_svo_probs(torch.softmax(self.alg_hl.actor_critic.get_svo(critic_obs), dim=-1))
                         reward_ep_ll = torch.zeros(self.env.num_envs, self.num_agents, 1, dtype=torch.float, device=self.device)
                         for i_ll in range(self.dt_hl):
                             actions_hl = self.env.project_into_track_frame(actions_hl_raw)
@@ -703,7 +707,7 @@ class BimaOnPolicyRunner:
         self.load_ll(path_ll, load_optimizer= load_optimizer)
         self.load_hl(path_hl, load_optimizer= load_optimizer)
 
-    def load_multi_path(self, paths_hl, paths_ll, load_optimizer=True):
+    def load_multi_path(self, paths_hl, paths_ll, load_hl=True, load_optimizer=True):
         model_dicts_hl, model_dicts_ll = [], []
         opt_dicts_hl, opt_dicts_ll = [], []
         dicts_hl, dicts_ll = [], []
@@ -718,12 +722,14 @@ class BimaOnPolicyRunner:
             dicts_ll.append(dict_ll)
             model_dicts_ll.append(dict_ll['model_state_dict'])
             opt_dicts_ll.append(dict_ll['optimizer_state_dict'])
-        self.alg_hl.actor_critic.load_multi_state_dict(model_dicts_hl)
+        if load_hl:
+            self.alg_hl.actor_critic.load_multi_state_dict(model_dicts_hl)
         self.alg_ll.actor_critic.load_multi_state_dict(model_dicts_ll)
         if load_optimizer:
-            self.alg_hl.optimizer.load_state_dict(opt_dicts_hl[0])
+            if load_hl:
+                self.alg_hl.optimizer.load_state_dict(opt_dicts_hl[0])
             self.alg_ll.optimizer.load_state_dict(opt_dicts_ll[0])
-        self.current_learning_iteration = dicts_hl[0]['iter']
+        self.current_learning_iteration = dicts_ll[0]['iter']  # NOTE: was dicts_hl
         self.initial_learning_iteration = self.current_learning_iteration
 
         # #add loaded models to buffers and set current ratings
