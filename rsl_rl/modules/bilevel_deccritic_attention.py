@@ -344,8 +344,8 @@ class SVOPredictor(nn.Module):
         obs = torch.concat((latent, obs2), dim=-1)
         svo_values = self._network(obs)
 
-        # # NOTE: maintaining better diversity (test)
-        # svo_values = 3.0 * torch.tanh(svo_values / 3.0)
+        # NOTE: maintaining better diversity (test)
+        svo_values = 1.0 * torch.tanh(svo_values / 1.0)
 
         return svo_values.view((-1, self._teamsize, self._num_actions, self._num_bins))
   
