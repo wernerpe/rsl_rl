@@ -123,7 +123,8 @@ class BimaDecSARSA:
         self.munchausen_coefficient = 0.9
         self.clip_value_min = -1e3
 
-        self.use_svo = True  # FIXME: integrate properly
+        self.use_svo = kwargs['use_svo']  # FIXME: integrate properly
+        self.svo_val = kwargs['svo_val']
 
         self.num_bins = actor_critic.teamacs[0].ac.num_bins
         self.svo_bins = actor_critic.teamacs[0].ac.svo_bins
@@ -183,7 +184,7 @@ class BimaDecSARSA:
             if self.use_sdqn or self.use_mdqn:
                 bootstrap_target_value = self.entropy_temperature * torch.logsumexp(self.transition.target_curr_values / self.entropy_temperature, dim=-1)  # .mean(dim=-1, keepdim=True)
             else:
-                bootstrap_target_value = self.compute_value_epsgreedy(self.transition.target_curr_valuesm)  # , centralized=self.centralized_value)
+                bootstrap_target_value = self.compute_value_epsgreedy(self.transition.target_curr_values)  # , centralized=self.centralized_value)
             self.transition.rewards += self.gamma * bootstrap_target_value * infos['time_outs'].unsqueeze(1).unsqueeze(1).to(self.device)
 
         is_not_done = (1.0 - 1.0 * self.transition.dones.unsqueeze(dim=-1).unsqueeze(dim=-1))
@@ -227,7 +228,22 @@ class BimaDecSARSA:
                 munchausen_term_a = torch.clip(munchausen_term_a, min=self.clip_value_min, max=0.)
                 rew_batch += self.munchausen_coefficient * munchausen_term_a
 
-            target = (rew_batch + self.gamma * target_val_batch).detach()
+            # target = (rew_batch + self.gamma * target_val_batch).detach()
+
+            if self.use_svo:
+                svo_values = torch.linspace(0, 1, self.svo_bins, device=self.device)[None, None, :, None]
+                if self.svo_val:
+                    ### Value composition
+                    svo_val = (rew_batch + self.gamma * target_val_batch)[..., None, :]
+                    svo_target = svo_values*svo_val + (1-svo_values)*svo_val.flip(1)
+                else:
+                    ### Reward composition
+                    svo_rew = svo_values*rew_batch[..., None, :] + (1-svo_values)*rew_batch.flip(1)[..., None, :]
+                    svo_target = (svo_rew + self.gamma * target_val_batch[..., None, :])
+                target = svo_target.detach()
+            else:
+                target = (rew_batch + self.gamma * target_val_batch).detach()
+                    
 
             val_all_batch = self.actor_critic.evaluate(obs_batch[:, self.actor_critic.teams[0], :])
             val_act_batch = torch.gather(val_all_batch, -1, act_idx_batch.unsqueeze(dim=-1)).squeeze(dim=-1)  # TODO: check whether [..., 0] faster
@@ -239,12 +255,10 @@ class BimaDecSARSA:
                     if self.use_svo:
                         svo_logits = self.actor_critic.get_svo(obs_batch[:, self.actor_critic.teams[0], :])
 
-                        temperature = 10.0
+                        temperature = 0.5  # 10.0
                         svo_probs = torch.softmax(svo_logits/temperature, dim=-1)
 
-                        svo_values = torch.linspace(0, 1, self.svo_bins, device='cuda:0')[None, None]
-                        svo_target = svo_values*target[..., None] + (1-svo_values)*target.flip(-1)[..., None]
-                        target = (svo_probs.squeeze()*svo_target).sum(dim=-1)
+                        target = (svo_probs.squeeze()*target).sum(dim=-1)
 
                         # Only focus on ego agent
                         target = target[..., 0]

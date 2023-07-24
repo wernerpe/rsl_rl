@@ -749,28 +749,29 @@ class BimaOnPolicyRunner:
         #     infos.append(info)
         # return infos
     
-    def populate_adversary_buffer(self, paths_hl, paths_ll):
+    def populate_adversary_buffer(self, paths_hl, paths_ll, load_hl=True):
         for path_hl, path_ll in zip(paths_hl, paths_ll):
-            # HL
-            dict_hl = torch.load(path_hl)
-            info_hl = dict_hl['infos']
-            #mu = info['trueskill']['mu']
-            #sigma = info['trueskill']['sigma']
-            #self.alg.actor_critic.past_ratings_mu.append(mu)
-            #self.alg.actor_critic.past_ratings_sigma.append(sigma)
-            self.alg_hl.actor_critic.past_models.append(dict_hl['model_state_dict'])
-            self.alg_hl.actor_critic.past_ratings_mu.append(self.alg_hl.actor_critic.past_ratings_mu[0])
-            self.alg_hl.actor_critic.past_ratings_sigma.append(self.alg_hl.actor_critic.past_ratings_sigma[0])
-            # LL
-            dict_ll = torch.load(path_ll)
-            info_ll = dict_hl['infos']
-            #mu = info['trueskill']['mu']
-            #sigma = info['trueskill']['sigma']
-            #self.alg.actor_critic.past_ratings_mu.append(mu)
-            #self.alg.actor_critic.past_ratings_sigma.append(sigma)
-            self.alg_ll.actor_critic.past_models.append(dict_ll['model_state_dict'])
-            self.alg_ll.actor_critic.past_ratings_mu.append(self.alg_ll.actor_critic.past_ratings_mu[0])
-            self.alg_ll.actor_critic.past_ratings_sigma.append(self.alg_ll.actor_critic.past_ratings_sigma[0])
+            if load_hl:
+                # HL
+                dict_hl = torch.load(path_hl)
+                info_hl = dict_hl['infos']
+                #mu = info['trueskill']['mu']
+                #sigma = info['trueskill']['sigma']
+                #self.alg.actor_critic.past_ratings_mu.append(mu)
+                #self.alg.actor_critic.past_ratings_sigma.append(sigma)
+                self.alg_hl.actor_critic.past_models.append(dict_hl['model_state_dict'])
+                self.alg_hl.actor_critic.past_ratings_mu.append(self.alg_hl.actor_critic.past_ratings_mu[0])
+                self.alg_hl.actor_critic.past_ratings_sigma.append(self.alg_hl.actor_critic.past_ratings_sigma[0])
+                # LL
+                dict_ll = torch.load(path_ll)
+                info_ll = dict_hl['infos']
+                #mu = info['trueskill']['mu']
+                #sigma = info['trueskill']['sigma']
+                #self.alg.actor_critic.past_ratings_mu.append(mu)
+                #self.alg.actor_critic.past_ratings_sigma.append(sigma)
+                self.alg_ll.actor_critic.past_models.append(dict_ll['model_state_dict'])
+                self.alg_ll.actor_critic.past_ratings_mu.append(self.alg_ll.actor_critic.past_ratings_mu[0])
+                self.alg_ll.actor_critic.past_ratings_sigma.append(self.alg_ll.actor_critic.past_ratings_sigma[0])
         
     def get_inference_policy_hl(self, device=None):
         self.alg_hl.actor_critic.eval() # switch to evaluation mode (dropout for example)
