@@ -112,8 +112,9 @@ class BimaDecSARSA:
         self._value_stdv_run_stdv = 0.0
 
         self.loss_fc = torch.nn.HuberLoss()
+        # self.loss_fc = torch.nn.MSELoss()
         self.num_update_steps = 0
-        self.target_update_interval = 20  # 50
+        self.target_update_interval = 20  # 20  # 50
 
         self.use_sdqn = use_sdqn  # True  # True
         self.use_mdqn = use_mdqn  # True

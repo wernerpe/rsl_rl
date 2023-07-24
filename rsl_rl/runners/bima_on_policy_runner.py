@@ -716,7 +716,7 @@ class BimaOnPolicyRunner:
         if load_optimizer:
             self.alg_hl.optimizer.load_state_dict(opt_dicts_hl[0])
             self.alg_ll.optimizer.load_state_dict(opt_dicts_ll[0])
-        self.current_learning_iteration = dicts_hl[0]['iter']
+        self.current_learning_iteration = dicts_ll[0]['iter']
         self.initial_learning_iteration = self.current_learning_iteration
 
         # #add loaded models to buffers and set current ratings
