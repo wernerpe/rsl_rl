@@ -264,8 +264,8 @@ class MultiTeamBilevelDecCritic(nn.Module):
         
         # HACK: 0.5 latest, 0.5 prior
         prob = 1/np.sum(self.draw_probs_unnorm[-len(self.past_models):]) * self.draw_probs_unnorm[-len(self.past_models):]
-        prob *= 0.7  # 0.5
-        prob[-1] += 0.3  # 0.5
+        prob *= 0.5  # 0.5
+        prob[-1] += 0.5  # 0.5
 
         if idx is None:
             idx = np.random.choice(len(self.past_models), self.num_teams-1, p = prob)
